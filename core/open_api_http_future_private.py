@@ -5,7 +5,7 @@ from core.config import Config
 from core.error_codes import ErrorCode
 from core.open_api_http_sign import get_auth_headers, sort_params
 import logging
-import asyncio
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
@@ -39,8 +39,17 @@ class OpenApiHttpFuturePrivate:
         return data.get("data", {})
 
     # ----------------------------- Account -----------------------------
-    def get_account(self, margin_coin: str = "USDT") -> Dict[str, Any]:
-        """Get account balance and margin info"""
+    # === ACCOUNT INFO ===
+    def get_account(self, margin_coin: str="USDT") -> Dict[str, Any]:
+        """
+        Get account balance and margin info
+        
+        Args:
+            margin_coin: Margin coin symbol (e.g., "USDT")
+        
+        Returns:
+            Account information including balance, available margin, etc.
+        """
         url = f"{self.base_url}/api/v1/futures/account"
         params = {"marginCoin": margin_coin}
         query = sort_params(params)
@@ -48,33 +57,94 @@ class OpenApiHttpFuturePrivate:
         r = self.session.get(url, params=params, headers=headers)
         return self._handle_response(r)
 
-    def change_leverage(self, symbol: str, leverage: int, margin_coin: str = "USDT") -> Dict[str, Any]:
-        """Change leverage"""
+    # === HEBEL (Leverage) ÄNDERN ===
+    def change_leverage(self, symbol: str, leverage: int = 5, margin_coin: str = "USDT") -> Dict[str, Any]:
+        """
+        Change leverage for a specific symbol
+        
+        Args:
+            symbol: Trading pair symbol (e.g., "BTCUSDT")
+            leverage: Leverage value (default: 5)
+            margin_coin: Margin coin (default: "USDT")
+        
+        Returns:
+            Result of leverage change operation
+        """
         url = f"{self.base_url}/api/v1/futures/account/change_leverage"
-        data = {"symbol": symbol, "marginCoin": margin_coin, "leverage": str(leverage)}
+        data = {
+            "symbol": symbol,
+            "marginCoin": margin_coin,
+            "leverage": str(leverage)
+        }
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
-
+    
+    # === MARGIN MODE ÄNDERN ===
     def change_margin_mode(self, symbol: str, margin_mode: str = "ISOLATION", margin_coin: str = "USDT") -> Dict[str, Any]:
-        """Change margin mode: ISOLATION / CROSS"""
+        """
+        Change margin mode for a specific symbol
+        
+        Args:
+            symbol: Trading pair symbol (e.g., "BTCUSDT")
+            margin_mode: Margin mode - "ISOLATION" or "CROSS" (default: "ISOLATION")
+            margin_coin: Margin coin (default: "USDT")
+        
+        Returns:
+            Result of margin mode change operation
+        """
         url = f"{self.base_url}/api/v1/futures/account/change_margin_mode"
-        data = {"symbol": symbol, "marginMode": margin_mode, "marginCoin": margin_coin}
+        data = {
+            "symbol": symbol,
+            "marginMode": margin_mode,
+            "marginCoin": margin_coin
+        }
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
 
+    # === POSITIONSMODUS ÄNDERN ===
     def change_position_mode(self, mode: str = "HEDGE") -> Dict[str, Any]:
-        """Change position mode: HEDGE / ONE_WAY"""
+        """
+        Change position mode
+        
+        Args:
+            mode: Position mode - "HEDGE" or "ONE_WAY" (default: "HEDGE")
+        
+        Returns:
+            Result of position mode change operation
+        """
         url = f"{self.base_url}/api/v1/futures/account/change_position_mode"
         data = {"positionMode": mode}
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
-
+    
+    # === HEBEL UND MARGIN MODE ABFRAGEN ===
+    def get_leverage_margin_mode(self, symbol: str, margin_coin: str = "USDT") -> Dict[str, Any]:
+        """
+        get Leverage and Margin Mode
+        
+        Args:
+            symbol: Trading pair symbol (e.g., "BTCUSDT")
+            margin_coin: Margin coin (default: "USDT")
+        
+        Returns:
+            Result margin mode and leverage
+        """
+        url = f"{self.base_url}/api/v1/futures/account/get_leverage_margin_mode"
+        data = {
+            "symbol": symbol,
+            "marginCoin": margin_coin
+        }
+        body = json.dumps(data)
+        headers = get_auth_headers(self.api_key, self.secret_key, body=body)
+        r = self.session.post(url, json=data, headers=headers)
+        return self._handle_response(r)
+    
     # ----------------------------- Orders -----------------------------
     def place_order(self,
                     symbol: str,
@@ -145,13 +215,53 @@ class OpenApiHttpFuturePrivate:
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
 
-    def modify_order(self, symbol: str, order_id: str, **kwargs) -> Dict[str, Any]:
-        """Modify an existing order"""
+    def modify_order(self,
+                 symbol: str,
+                 order_id: Optional[str] = None,
+                 client_id: Optional[str] = None,
+                 price: Optional[str] = None,
+                 qty: Optional[str] = None,
+                 trigger_price: Optional[str] = None,
+                 # TP/SL Parameters
+                 tp_price: Optional[str] = None,
+                 tp_stop_type: Optional[str] = None,
+                 tp_order_type: Optional[str] = None,
+                 tp_order_price: Optional[str] = None,
+                 sl_price: Optional[str] = None,
+                 sl_stop_type: Optional[str] = None,
+                 sl_order_type: Optional[str] = None,
+                 sl_order_price: Optional[str] = None
+                 ) -> Dict[str, Any]:
+        """
+        Modify an existing order
+        Note: Must provide either orderId OR clientId
+        """
         url = f"{self.base_url}/api/v1/futures/trade/modify_order"
-        data = {"symbol": symbol, "orderId": order_id}
-        for k, v in kwargs.items():
+        
+        # Symbol ist Pflicht
+        data = {"symbol": symbol}
+        
+        # Optional fields - nur hinzufügen wenn gesetzt
+        optional = {
+            "orderId": order_id,
+            "clientId": client_id,
+            "price": price,
+            "qty": qty,
+            "triggerPrice": trigger_price,
+            "tpPrice": tp_price,
+            "tpStopType": tp_stop_type,
+            "tpOrderType": tp_order_type,
+            "tpOrderPrice": tp_order_price,
+            "slPrice": sl_price,
+            "slStopType": sl_stop_type,
+            "slOrderType": sl_order_type,
+            "slOrderPrice": sl_order_price
+        }
+        
+        for k, v in optional.items():
             if v is not None:
                 data[k] = v
+        
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
         r = self.session.post(url, json=data, headers=headers)
@@ -205,59 +315,3 @@ class OpenApiHttpFuturePrivate:
         r = self.session.get(url, params=params, headers=headers)
         return self._handle_response(r)
 
-async def main():
-    """Main function example"""
-    # Load configuration
-    config = Config()
-    
-    # Create client
-    client = OpenApiHttpFuturePrivate(config)
-    
-    try:
-        # Get account information
-        account = client.get_account()
-        logging.info(f"Account info: {account}")
-        
-        # Get historical position information
-        #history_positions = client.get_history_positions("BTCUSDT")
-        #logging.info(f"History positions: {history_positions}")
-        
-        # Get historical orders
-        #history_orders = client.get_history_orders("BTCUSDT")
-        #logging.info(f"History orders: {history_orders}")
-
-        """
-        WARNING!!! This is example code for placing and canceling orders. If you are using a real account,
-        please be cautious when uncommenting for testing, as any financial losses will be your responsibility.
-        """
-        # # Example order placement (limit order)
-        # order = client.place_order(
-        #     symbol="BTCUSDT",
-        #     side="BUY",
-        #     order_type="LIMIT",
-        #     qty="0.5",
-        #     price="60000",
-        #     trade_side="OPEN",
-        #     effect="GTC",
-        #     reduce_only=False,
-        #     client_id=time.strftime("%Y%m%d%H%M%S", time.localtime()),
-        #     tp_price="61000",
-        #     tp_stop_type="MARK",
-        #     tp_order_type="LIMIT",
-        #     tp_order_price="61000.1"
-        # )
-        # logging.info(f"Place order result: {order}")
-        #
-        # # Example order cancellation
-        # if order and "orderId" in order:
-        #     cancel_result = client.cancel_orders("BTCUSDT", [
-        #         {"orderId": order["orderId"]},
-        #         {"clientId": order["clientId"]}
-        #     ])
-        #     logging.info(f"Cancel orders result: {cancel_result}")
-        
-    except Exception as e:
-        logging.error(f"Error in main: {e}")
-
-if __name__ == "__main__":
-    asyncio.run(main()) 

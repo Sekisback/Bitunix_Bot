@@ -83,11 +83,11 @@ async def main():
         # logging.info(f"Klines data: {start_time_UTC} - {end_time_UTC}, {klines}")
 
         # === Coin Details abrufen ===
-        logging.info(f"📊 Rufe Coin Detail ab...")
-        trading_pairs = market.get_trading_pairs(
-            symbols=None                  # values: None, SYMBOLS
-        )
-        logging.info(f"Coin Detail: {trading_pairs}")
+        # logging.info(f"📊 Rufe Coin Detail ab...")
+        # trading_pairs = market.get_trading_pairs(
+        #     symbols=None                  # values: None, SYMBOLS
+        # )
+        # logging.info(f"Coin Detail: {trading_pairs}")
         
         # === Margin Mode ändern ===
         # logging.info(f"⚙️ Ändere Margin Mode für {SYMBOL} auf ISOLATION...")

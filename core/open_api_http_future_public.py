@@ -1,8 +1,8 @@
 from typing import Dict, Optional, Any
 import requests
-from config import Config
-from error_codes import ErrorCode
-from open_api_http_sign import get_auth_headers, sort_params
+from core.config import Config
+from core.error_codes import ErrorCode
+from core.open_api_http_sign import get_auth_headers, sort_params
 import logging
 import asyncio
 import time
@@ -68,13 +68,14 @@ class OpenApiHttpFuturePublic:
         response = self.session.get(url, params=params, headers=headers)
         return self._handle_response(response)
     
-    def get_depth(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+
+    def get_depth(self, symbol: str, limit: Any = max) -> Dict[str, Any]:
         """
         Get depth data
         
         Args:
             symbol: Futures trading pair
-            limit: Depth quantity, default 100
+            limit: Depth quantity, value: 1 / 5 / 15 / 50 / max
             
         Returns:
             Dict[str, Any]: Depth data
@@ -124,13 +125,50 @@ class OpenApiHttpFuturePublic:
         
         response = self.session.get(url, params=params, headers=headers)
         return self._handle_response(response)
+    
+    def get_funding_rate(self, symbol: str) -> Dict[str, Any]:
+        """
+        Get funding rate
+        """
+        url = f"{self.base_url}/api/v1/futures/market/funding_rate"
+        params = {
+            "symbol": symbol
+        }
+        
+        query_string = sort_params(params)
+        headers = get_auth_headers(self.config.api_key, self.config.secret_key, query_string)
+        
+        response = self.session.get(url, params=params, headers=headers)
+        return self._handle_response(response)
 
-    def get_batch_funding_rate(self, symbols: Optional[str] = None) -> Dict[str, Any]:
+    def get_batch_funding_rate(self) -> Dict[str, Any]:
         """
         Get batch funding rate
         """
         url = f"{self.base_url}/api/v1/futures/market/funding_rate/batch"
         params = {}
+        
+        query_string = sort_params(params)
+        headers = get_auth_headers(self.config.api_key, self.config.secret_key, query_string)
+        
+        response = self.session.get(url, params=params, headers=headers)
+        return self._handle_response(response)
+    
+    def get_trading_pairs(self, symbols: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get future trading pair details
+
+        Args:
+            symbols: Futures trading pairs
+            
+        Returns:
+            Dict[str, Any]: trading pair details
+        """
+        url = f"{self.base_url}/api/v1/futures/market/trading_pairs"
+        params = {}
+
+        if symbols:
+            params["symbols"] = symbols
         
         query_string = sort_params(params)
         headers = get_auth_headers(self.config.api_key, self.config.secret_key, query_string)
