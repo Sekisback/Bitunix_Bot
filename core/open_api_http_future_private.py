@@ -146,51 +146,81 @@ class OpenApiHttpFuturePrivate:
         return self._handle_response(r)
     
     # ----------------------------- Orders -----------------------------
-    def place_order(self,
-                    symbol: str,
-                    side: str,
-                    order_type: str,
-                    qty: str,
-                    price: Optional[str] = None,
-                    trade_side: str = "OPEN",
-                    effect: str = "GTC",
-                    client_id: Optional[str] = None,
-                    reduce_only: bool = False,
-                    position_id: Optional[str] = None,
-                    # TP/SL
-                    tp_price: Optional[str] = None,
-                    tp_stop_type: Optional[str] = None,
-                    tp_order_type: Optional[str] = None,
-                    tp_order_price: Optional[str] = None,
-                    sl_price: Optional[str] = None,
-                    sl_stop_type: Optional[str] = None,
-                    sl_order_type: Optional[str] = None,
-                    sl_order_price: Optional[str] = None,
-                    # Trigger / Conditional
-                    trigger_price: Optional[str] = None,
-                    trigger_type: Optional[str] = None,
-                    order_from: Optional[str] = None,
-                    position_mode: Optional[str] = None,
-                    reduce_mode: Optional[str] = None
-                    ) -> Dict[str, Any]:
+    # === ORDER SETZEN ===
+    def place_order(self, symbol: str, side: str, order_type: str, qty: str, price: Optional[str] = None, trade_side: str = "OPEN",
+                    effect: str = "GTC", client_id: Optional[str] = None, reduce_only: bool = False, position_id: Optional[str] = None,
+                    tp_price: Optional[str] = None, tp_stop_type: Optional[str] = None, tp_order_type: Optional[str] = None, tp_order_price: Optional[str] = None,
+                    sl_price: Optional[str] = None, sl_stop_type: Optional[str] = None, sl_order_type: Optional[str] = None, sl_order_price: Optional[str] = None) -> Dict[str, Any]:
         """
-        Place an order (supports SL/TP, trigger, trailing etc.)
+        Place a futures order (supports MARKET/LIMIT + TP/SL fields)
+
+        Endpoint:
+            POST /api/v1/futures/trade/place_order
+
+        Required args:
+            symbol (str): Futures symbol, e.g. "BTCUSDT"
+            side (str): "BUY" or "SELL"
+            order_type (str): "LIMIT" or "MARKET"
+            qty (str): Order quantity
+
+        Optional args:
+            price (str): Limit price (REQUIRED if order_type == "LIMIT")
+            trade_side (str): "OPEN" (default) or "CLOSE"
+            effect (str): "GTC" (default), "IOC", "FOK"
+            client_id (str): Custom client order ID. If None, a random ID is generated.
+            reduce_only (bool): Only reduce existing position (default False)
+            position_id (str): Position ID when targeting a specific position
+
+            # Take-Profit / Stop-Loss trigger fields (optional)
+            tp_price (str): TP trigger price
+            tp_stop_type (str): "MARK_PRICE" or "LAST_PRICE"
+            tp_order_type (str): "MARKET" or "LIMIT"
+            tp_order_price (str): Required if tp_order_type == "LIMIT"
+
+            sl_price (str): SL trigger price
+            sl_stop_type (str): "MARK_PRICE" or "LAST_PRICE"
+            sl_order_type (str): "MARKET" or "LIMIT"
+            sl_order_price (str): Required if sl_order_type == "LIMIT"
+
+        Returns:
+            Dict[str, Any]: API response (e.g. contains orderId, clientId, status)
+
+        Notes:
+            - Leverage and margin mode are NOT parameters of this endpoint.
+            Use /account/change_leverage and /account/change_margin_mode instead.
         """
         url = f"{self.base_url}/api/v1/futures/trade/place_order"
-        data = {
+
+        # --- Basic validation ---
+        ot = order_type.upper()
+        if ot not in ("LIMIT", "MARKET"):
+            raise ValueError("order_type must be 'LIMIT' or 'MARKET'.")
+        if ot == "LIMIT" and not price:
+            raise ValueError("price is required for LIMIT orders.")
+        if tp_order_type and tp_order_type.upper() == "LIMIT" and not tp_order_price:
+            raise ValueError("tp_order_price is required when tp_order_type='LIMIT'.")
+        if sl_order_type and sl_order_type.upper() == "LIMIT" and not sl_order_price:
+            raise ValueError("sl_order_price is required when sl_order_type='LIMIT'.")
+
+        # --- Ensure clientId ---
+        if not client_id:
+            client_id = f"{int(time.time())}_{uuid.uuid4().hex[:8]}"
+
+        # --- Payload ---
+        data: Dict[str, Any] = {
             "symbol": symbol,
             "side": side,
             "orderType": order_type,
             "qty": qty,
             "tradeSide": trade_side,
             "effect": effect,
-            "reduceOnly": reduce_only
+            "reduceOnly": reduce_only,
+            "clientId": client_id
         }
 
-        # Optional fields
+        # Optional fields only when present
         optional = {
             "price": price,
-            "clientId": client_id,
             "positionId": position_id,
             "tpPrice": tp_price,
             "tpStopType": tp_stop_type,
@@ -200,64 +230,70 @@ class OpenApiHttpFuturePrivate:
             "slStopType": sl_stop_type,
             "slOrderType": sl_order_type,
             "slOrderPrice": sl_order_price,
-            "triggerPrice": trigger_price,
-            "triggerType": trigger_type,
-            "orderFrom": order_from,
-            "positionMode": position_mode,
-            "reduceMode": reduce_mode
         }
+
+        # Filter out None values
         for k, v in optional.items():
             if v is not None:
                 data[k] = v
 
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
+
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
 
-    def modify_order(self,
-                 symbol: str,
-                 order_id: Optional[str] = None,
-                 client_id: Optional[str] = None,
-                 price: Optional[str] = None,
-                 qty: Optional[str] = None,
-                 trigger_price: Optional[str] = None,
-                 # TP/SL Parameters
-                 tp_price: Optional[str] = None,
-                 tp_stop_type: Optional[str] = None,
-                 tp_order_type: Optional[str] = None,
-                 tp_order_price: Optional[str] = None,
-                 sl_price: Optional[str] = None,
-                 sl_stop_type: Optional[str] = None,
-                 sl_order_type: Optional[str] = None,
-                 sl_order_price: Optional[str] = None
-                 ) -> Dict[str, Any]:
+
+    # === ORDER MODIFIZIEREN ===
+    def modify_order(self, order_id: Optional[str] = None, client_id: Optional[str] = None, 
+                    price: Optional[str] = None, qty: Optional[str] = None,
+                    tp_price: Optional[str] = None, tp_order_price: Optional[str] = None, 
+                    sl_price: Optional[str] = None, sl_order_price: Optional[str] = None) -> Dict[str, Any]:
         """
-        Modify an existing order
-        Note: Must provide either orderId OR clientId
+        Modify an existing futures order.
+
+        Endpoint:
+            POST /api/v1/futures/trade/modify_order
+
+        Args:
+            order_id (str): Bitunix order ID (required if client_id not provided)
+            client_id (str): Client order ID (required if order_id not provided)
+            price (str): New limit price (required for LIMIT orders)
+            qty (str): New quantity (required)
+            tp_price (str, optional): Take-profit trigger price
+            tp_order_price (str, optional): Take-profit limit order price
+            sl_price (str, optional): Stop-loss trigger price
+            sl_order_price (str, optional): Stop-loss limit order price
+
+        Returns:
+            Dict[str, Any]: Bitunix API response (updated order info)
+
+        Raises:
+            ValueError: If neither order_id nor client_id is provided
+            Exception: If the API returns an error
         """
         url = f"{self.base_url}/api/v1/futures/trade/modify_order"
-        
-        # Symbol ist Pflicht
-        data = {"symbol": symbol}
-        
-        # Optional fields - nur hinzufügen wenn gesetzt
+
+        # === Validation ===
+        if not order_id and not client_id:
+            raise ValueError("Either 'order_id' or 'client_id' must be provided")
+
+        # === Build payload ===
+        data = {}
+        if order_id:
+            data["orderId"] = order_id
+        if client_id:
+            data["clientId"] = client_id              # ← KORRIGIERT
+
+        # Optional parameters
         optional = {
-            "orderId": order_id,
-            "clientId": client_id,
             "price": price,
             "qty": qty,
-            "triggerPrice": trigger_price,
-            "tpPrice": tp_price,
-            "tpStopType": tp_stop_type,
-            "tpOrderType": tp_order_type,
+            "tpPrice": tp_price,                      # ← KORRIGIERT
             "tpOrderPrice": tp_order_price,
-            "slPrice": sl_price,
-            "slStopType": sl_stop_type,
-            "slOrderType": sl_order_type,
+            "slPrice": sl_price,                      # ← KORRIGIERT
             "slOrderPrice": sl_order_price
         }
-        
         for k, v in optional.items():
             if v is not None:
                 data[k] = v
@@ -267,6 +303,8 @@ class OpenApiHttpFuturePrivate:
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
 
+
+    # === ORDER SCHLIESSEN ===
     def cancel_orders(self, symbol: str, orders: List[Dict[str, str]]) -> Dict[str, Any]:
         """Cancel one or multiple orders"""
         url = f"{self.base_url}/api/v1/futures/trade/cancel_orders"
@@ -276,14 +314,36 @@ class OpenApiHttpFuturePrivate:
         r = self.session.post(url, json=data, headers=headers)
         return self._handle_response(r)
 
-    def get_open_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
-        """Get all current (unfilled) orders"""
-        url = f"{self.base_url}/api/v1/futures/trade/get_orders"
-        params = {"symbol": symbol} if symbol else {}
-        query = sort_params(params)
-        headers = get_auth_headers(self.api_key, self.secret_key, query)
-        r = self.session.get(url, params=params, headers=headers)
-        return self._handle_response(r)
+
+    # === OFFENE ORDERN ===
+    def get_order_detail(self, order_id: Optional[str] = None, client_order_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get detailed information for a specific order.
+        POST /api/v1/futures/trade/get_order_detail
+
+        Args:
+            order_id: The unique order ID returned by Bitunix.
+            client_order_id: The custom client ID (if you set one).
+
+        Returns:
+            Dict[str, Any]: Detailed order info.
+        """
+        url = f"{self.base_url}/api/v1/futures/trade/get_order_detail"
+
+        if not order_id and not client_order_id:
+            raise ValueError("Either 'order_id' or 'client_order_id' must be provided")
+
+        data = {}
+        if order_id:
+            data["orderId"] = order_id
+        if client_order_id:
+            data["clientOrderId"] = client_order_id
+
+        body = json.dumps(data)
+        headers = get_auth_headers(self.api_key, self.secret_key, body=body)
+        response = self.session.post(url, json=data, headers=headers)
+        return self._handle_response(response)
+
 
     def get_history_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Get historical orders"""

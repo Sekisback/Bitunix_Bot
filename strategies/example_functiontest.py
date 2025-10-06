@@ -39,6 +39,10 @@ async def main():
         account = client.get_account()
         logging.info(f"✅ Account-Info: {account}")        
 
+        logging.info(f"📊 Order Detail ab...")
+        account = client.get_open_orders()
+        logging.info(f"✅ Account-Info: {account}")  
+
         # === Marktdaten abrufen ===
         # logging.info(f"📊 Rufe Marktdaten ab...")
         # tickers = market.get_tickers(

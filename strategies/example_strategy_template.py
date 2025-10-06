@@ -34,13 +34,16 @@ async def main():
     """
 
     # === 🧩 Konfiguration der Strategie ===
-    SYMBOL = "AKEUSDT"     # Coin-Paar
-    SIDE = "BUY"           # BUY oder SELL
-    ORDER_TYPE = "LIMIT"   # MARKET oder LIMIT
-    QTY = "1000"           # Ordermenge
-    PRICE = "0.0015"       # Nur für LIMIT erforderlich sonst None
-    TP = None              # Optional: Take-Profit
-    SL = "0.00148"         # Optional: Stop-Loss
+    SYMBOL      = "AKEUSDT"         # Coin-Paar
+    SIDE        = "BUY"             # BUY oder SELL
+    ORDER_TYPE  = "LIMIT"           # MARKET oder LIMIT
+    QTY         = "1000"            # Ordermenge
+    PRICE       = "0.0015"          # Nur für LIMIT erforderlich sonst None
+    TP          = None              # Optional: Take-Profit, default: None
+    SL          = "0.00148"         # Optional: Stop-Loss
+    LEVERAGE    = 10                # int Value depence on Coin 1-125
+    CLIENTID    = "Bitunixbot_123"  # default: None
+
 
     logging.info(f"Starte Strategie für {SYMBOL} → {SIDE} {ORDER_TYPE} {QTY}")
 
@@ -56,10 +59,13 @@ async def main():
             order_type=ORDER_TYPE,
             qty=QTY,
             price=PRICE,
+            trade_side="OPEN",
+            leverage=LEVERAGE,
             tp_price=TP,
             sl_price=SL,
-            trade_side="OPEN",   # Position eröffnen
-            effect="GTC",        # Gültig bis Cancel
+            tp_stop_type="MARK_PRICE",
+            sl_stop_type="MARK_PRICE",
+            client_id=CLIENTID
         )
 
         logging.info(f"✅ Order erfolgreich platziert: {result}")
