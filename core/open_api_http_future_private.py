@@ -5,6 +5,8 @@ from core.config import Config
 from core.error_codes import ErrorCode
 from core.open_api_http_sign import get_auth_headers, sort_params
 import logging
+import time
+import uuid
 
 
 # Configure logging
@@ -304,11 +306,57 @@ class OpenApiHttpFuturePrivate:
         return self._handle_response(r)
 
 
-    # === ORDER SCHLIESSEN ===
-    def cancel_orders(self, symbol: str, orders: List[Dict[str, str]]) -> Dict[str, Any]:
-        """Cancel one or multiple orders"""
+    # === ORDERS STORNIEREN (MEHRERE) ===
+    def cancel_orders(self, symbol: str, order_list: List[Dict[str, str]]) -> Dict[str, Any]:
+        """
+        Cancel one or multiple futures orders.
+
+        Endpoint:
+            POST /api/v1/futures/trade/cancel_orders
+
+        Args:
+            symbol (str): Trading pair (e.g., "BTCUSDT")
+            order_list (List[Dict[str, str]]): List of orders to cancel
+                Each dict must contain either:
+                - {"orderId": "123456"} or
+                - {"clientId": "my_order_id"}
+
+        Returns:
+            Dict[str, Any]: Response with successList and failureList
+                {
+                    "successList": [{"orderId": "...", "clientId": "..."}],
+                    "failureList": [{"orderId": "...", "clientId": "...", "errorMsg": "...", "errorCode": ...}]
+                }
+
+        Raises:
+            ValueError: If order_list is empty or invalid
+            Exception: If the API returns an error
+
+        Example:
+            cancel_orders(
+                symbol="BTCUSDT",
+                order_list=[
+                    {"orderId": "123456"},
+                    {"clientId": "my_order_1"}
+                ]
+            )
+        """
         url = f"{self.base_url}/api/v1/futures/trade/cancel_orders"
-        data = {"symbol": symbol, "orderList": orders}
+
+        # === Validation ===
+        if not order_list:
+            raise ValueError("order_list cannot be empty")
+        
+        for order in order_list:
+            if "orderId" not in order and "clientId" not in order:
+                raise ValueError("Each order must contain either 'orderId' or 'clientId'")
+
+        # === Build payload ===
+        data = {
+            "symbol": symbol,
+            "orderList": order_list
+        }
+        
         body = json.dumps(data)
         headers = get_auth_headers(self.api_key, self.secret_key, body=body)
         r = self.session.post(url, json=data, headers=headers)
