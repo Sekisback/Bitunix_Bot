@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Bitunix Bot Control</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <h1>Bitunix Trading Bot</h1>
+
+    <p>Status: 
+        <strong style="color: {{ 'green' if running else 'red' }}">
+            {{ "läuft" if running else "gestoppt" }}
+        </strong>
+    </p>
+
+    <a href="{{ url_for('start') }}"><button>Start</button></a>
+    <a href="{{ url_for('stop') }}"><button>Stop</button></a>
+
+    <h2>Logs (letzte 50 Zeilen)</h2>
+    <pre>{{ "\n".join(logs) }}</pre>
+</body>
+</html>
