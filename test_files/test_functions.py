@@ -39,9 +39,9 @@ async def main():
         account = client.get_account()
         logging.info(f"✅ Account-Info: {account}")        
 
-        logging.info(f"📊 Order Detail ab...")
-        account = client.get_open_orders()
-        logging.info(f"✅ Account-Info: {account}")  
+        # logging.info(f"📊 Order Detail ab...")
+        # account = client.get_open_orders()
+        # logging.info(f"✅ Account-Info: {account}")  
 
         # === Marktdaten abrufen ===
         # logging.info(f"📊 Rufe Marktdaten ab...")
@@ -72,14 +72,14 @@ async def main():
 
         # === K-Line (Candlestick) abrufen ===
         # current_time = int(time.time() * 1000)          # Current timestamp (milliseconds)
-        # one_hour_ago = current_time - (60 * 60 * 1000)  # One hour ago timestamp
+        # one_hour_ago = current_time - (60 * 180 * 1000)  # One hour ago timestamp
         # end_time_UTC = datetime.datetime.fromtimestamp(current_time / 1000).strftime('%H:%M:%S')
         # start_time_UTC = datetime.datetime.fromtimestamp(one_hour_ago / 1000).strftime('%H:%M:%S')
 
         # klines = market.get_kline(
         #     symbol=SYMBOL, 
         #     interval="1m",              # kline interval such as 1m 5m 15m 30m 1h 2h 4h 6h 8h 12h 1d 3d 1w 1M
-        #     limit=5,                    # Default: 100, maximum: 200
+        #     limit=200,                    # Default: 100, maximum: 200
         #     start_time=one_hour_ago,    # Unix timestamp, such as 1672410780000
         #     end_time=current_time,      # Unix timestamp, such as 1672410780000
         #     type="LAST_PRICE"           # values: LAST_PRICE, MARK_PRICE
