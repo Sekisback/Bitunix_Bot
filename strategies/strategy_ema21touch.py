@@ -105,9 +105,56 @@ def setup_logging():
     
     # Start-Meldung
     if DEBUG:
-        logging.info(f"📝 DEBUG MODE - Vollständiges Logging: {log_file}")
+        logging.info(f"🔍 DEBUG MODE - Vollständiges Logging: {log_file}")
     else:
-        logging.info(f"📝 Logging eingerichtet: {log_file} (nur Orders + Errors)")
+        logging.info(f"🔍 Logging eingerichtet: {log_file} (nur Orders + Errors)")
+
+
+
+# ==================================================
+# === SYMBOL INFO ==================================
+# ==================================================
+def get_symbol_info(client_pub, symbol: str) -> dict:
+    """
+    Holt Trading Pair Informationen für ein Symbol
+    
+    Args:
+        client_pub: Public API Client
+        symbol: Trading Symbol (z.B. "BTCUSDT")
+    
+    Returns:
+        Dict mit Symbol-Infos (basePrecision, minTradeVolume, etc.)
+    """
+    try:
+        # Trading Pair Info abrufen
+        pair_info = client_pub.get_trading_pairs(symbols=symbol)
+        
+        # Prüfe ob Daten vorhanden
+        if not pair_info or len(pair_info) == 0:
+            raise ValueError(f"Keine Trading Pair Info für {symbol} gefunden")
+        
+        # Erste (und einzige) Position
+        info = pair_info[0]
+        
+        # Extrahiere relevante Infos
+        base_precision = int(info['basePrecision'])
+        min_trade_volume = float(info['minTradeVolume'])
+        
+        if DEBUG:
+            logging.info(f"📊 Symbol Info: Precision={base_precision}, Min Volume={min_trade_volume}")
+        
+        return {
+            'base_precision': base_precision,
+            'quote_precision': int(info['quotePrecision']),
+            'min_trade_volume': min_trade_volume,
+            'max_leverage': int(info['maxLeverage']),
+            'min_leverage': int(info['minLeverage'])
+        }
+        
+    except Exception as e:
+        logging.error(f"❌ Fehler beim Abrufen der Symbol Info: {e}")
+        raise
+
 
 # ==================================================
 # === TRENDFILTER ==================================
@@ -514,10 +561,10 @@ def generate_trade_signal(df: pd.DataFrame) -> dict:
         will_trade = False
         if hierarchy["long_ok"] and touch["side"] == "from_above":
             will_trade = True
-            logging.info("➡️  LONG Signal wird generiert!")
+            logging.info("➡️ LONG Signal wird generiert!")
         elif hierarchy["short_ok"] and touch["side"] == "from_below":
             will_trade = True
-            logging.info("➡️  SHORT Signal wird generiert!")
+            logging.info("➡️ SHORT Signal wird generiert!")
         else:
             logging.info("❌ KEIN Signal - Bedingungen:")
             if not hierarchy["long_ok"] and not hierarchy["short_ok"]:
@@ -701,18 +748,35 @@ async def fetch_account_info(client: OpenApiHttpFuturePrivate) -> float:
 # ==================================================
 # === TRADE PARAMETER BERECHNUNG ===================
 # ==================================================
-def calc_trade_parameters(balance: float, current_price: float, leverage: int,
-                          tp_pct: float, sl_pct: float, total_fees: float):
+def calc_trade_parameters(client_pub, symbol: str, balance: float, current_price: float, 
+                         leverage: int, tp_pct: float, sl_pct: float, total_fees: float):
     """
-    Berechnet Trade-Parameter (qty in Coins, TP, SL)
-    Coin-Menge wird auf 0.01 BTC Schritte gerundet
+    Berechnet Trade-Parameter (qty in Coins, TP, SL) mit automatischer Precision
     
     TP: 1% Gewinn NACH Abzug der Gebühren
     SL: 0.5% Verlust INKLUSIVE Gebühren
+    
+    Args:
+        client_pub: Public API Client für Symbol Info
+        symbol: Trading Symbol
+        balance: Verfügbares Guthaben
+        current_price: Aktueller Preis
+        leverage: Hebel
+        tp_pct: Take Profit Prozent
+        sl_pct: Stop Loss Prozent
+        total_fees: Gesamte Gebühren
+    
+    Returns:
+        qty_coins, tp_price, sl_price
     """
     # Prüfe Preis
     if current_price <= 0:
         raise ValueError("current_price must be > 0")
+
+    # Symbol Info abrufen (für Precision)
+    symbol_info = get_symbol_info(client_pub, symbol)
+    base_precision = symbol_info['base_precision']
+    min_trade_volume = symbol_info['min_trade_volume']
 
     # Kaufkraft berechnen
     buying_power = balance * leverage
@@ -720,9 +784,14 @@ def calc_trade_parameters(balance: float, current_price: float, leverage: int,
     # Positionsgröße in Coins (ungerundet)
     qty_coins_raw = buying_power / current_price
     
-    # Auf 0.01 BTC Schritte runden (abrunden)
-    tick_size = 0.01
-    qty_coins = (qty_coins_raw // tick_size) * tick_size
+    # Mit korrekter Precision runden
+    qty_coins = round(qty_coins_raw, base_precision)
+    
+    # Mindestmenge prüfen
+    if qty_coins < min_trade_volume:
+        logging.warning(f"⚠️ Berechnete Menge {qty_coins} < minTradeVolume {min_trade_volume}")
+        qty_coins = min_trade_volume
+        logging.info(f"📊 Menge auf Minimum angepasst: {qty_coins}")
     
     # Tatsächliche Positionsgröße in USDT
     position_size_usdt = qty_coins * current_price
@@ -757,7 +826,9 @@ def calc_trade_parameters(balance: float, current_price: float, leverage: int,
         logging.info(f"Hebel:          {leverage}x")
         logging.info(f"Kaufkraft:      {buying_power:.2f} USDT")
         logging.info(f"Preis:          {current_price:.5f} USDT")
-        logging.info(f"Menge:          {qty_coins:.2f} BTC (Schritte: 0.01)")
+        logging.info(f"Precision:      {base_precision} Nachkommastellen")
+        logging.info(f"Min Volume:     {min_trade_volume}")
+        logging.info(f"Menge:          {qty_coins} Coins")
         logging.info(f"Position:       {position_size_usdt:.2f} USDT")
         logging.info(f"Margin:         {margin_to_use:.2f} USDT")
         logging.info(f"Gebühren:       {fee_usdt:.2f} USDT")
@@ -802,7 +873,7 @@ def place_order_dryrun(signal: dict, qty: float, balance: float):
     print(f"Signal:         {side}")
     print(f"Grund:          {signal['reason']}")
     print(f"Entry Preis:    {entry:.5f} USDT")
-    print(f"Menge:          {qty:.2f} Coins")
+    print(f"Menge:          {qty} Coins")
     print(f"Position Größe: {position_size:.2f} USDT")
     print(f"Hebel:          {LEVERAGE}x")
     print(f"Margin:         {margin_used:.2f} USDT")
@@ -840,7 +911,7 @@ def place_order_dryrun(signal: dict, qty: float, balance: float):
     print(f"Potentieller Verlust: -{loss_usdt:.2f} USDT ({loss_pct:.2f}% auf Margin)")
     print(f"Risk/Reward Ratio: 1:{(profit_usdt/loss_usdt):.2f}")
     print("=" * 60)
-    print("⚠️  DRY RUN MODE - Keine echte Order platziert!")
+    print("⚠️ DRY RUN MODE - Keine echte Order platziert!")
     print("=" * 60 + "\n")
     
     # Auch ins Log schreiben    
@@ -850,7 +921,7 @@ def place_order_dryrun(signal: dict, qty: float, balance: float):
     logging.info(f"Signal:         {side}")
     logging.info(f"Grund:          {signal['reason']}")
     logging.info(f"Entry Preis:    {entry:.5f} USDT")
-    logging.info(f"Menge:          {qty:.2f} Coins")
+    logging.info(f"Menge:          {qty} Coins")
     logging.info(f"Position Größe: {position_size:.2f} USDT")
     logging.info(f"Hebel:          {LEVERAGE}x")
     logging.info(f"Margin:         {margin_used:.2f} USDT")
@@ -860,7 +931,7 @@ def place_order_dryrun(signal: dict, qty: float, balance: float):
     logging.info(f"Potentieller Verlust: -{loss_usdt:.2f} USDT ({loss_pct:.2f}% auf Margin)")
     logging.info(f"Risk/Reward Ratio: 1:{(profit_usdt/loss_usdt):.2f}")
     logging.info("=" * 60)
-    logging.info("⚠️  DRY RUN MODE - Keine echte Order platziert!")
+    logging.info("⚠️ DRY RUN MODE - Keine echte Order platziert!")
     logging.info("=" * 60)
 
 # ==================================================
@@ -902,8 +973,8 @@ async def bot_loop(client_pri, client_pub):
                             
                             if has_position:
                                 if not active_position:
-                                    logging.info("📍 Aktive Position erkannt!")
-                                    print("📍 Aktive Position erkannt - warte auf Schließung...")
+                                    logging.info("🔒 Aktive Position erkannt!")
+                                    print("🔒 Aktive Position erkannt - warte auf Schließung...")
                                     active_position = True
                                 else:
                                     if DEBUG:
@@ -984,7 +1055,10 @@ async def bot_loop(client_pri, client_pub):
                     await asyncio.sleep(60)
                     continue
                 
+                # NEU: calc_trade_parameters mit client_pub aufrufen
                 qty, tp_price, sl_price = calc_trade_parameters(
+                    client_pub=client_pub,
+                    symbol=SYMBOL,
                     balance=balance,
                     current_price=current_price,
                     leverage=LEVERAGE,
@@ -1010,7 +1084,7 @@ async def bot_loop(client_pri, client_pub):
                     await asyncio.sleep(60)
                 else:
                     if DEBUG:
-                        logging.info(f"⏸️  Kein Signal: {signal['reason']}")
+                        logging.info(f"⏸️ Kein Signal: {signal['reason']}")
                     await asyncio.sleep(10)
                 
             except asyncio.CancelledError:
