@@ -1,0 +1,28 @@
+# ===================================================
+# ONDO Coin spezifische Einstellungen
+# Überschreibt nur die Werte aus base.yaml die anders sein sollen
+# ===================================================
+
+symbol: "ONDOUSDT"
+
+# ONDO spezifische Trading Parameter
+trading:
+  leverage: 3
+  interval: "1m"
+  dry_run: true
+  fixed_qty: 100                        # Feste Menge in Coins (null = automatisch berechnen)
+  client_id_prefix: "EMA_TOUCH_ONDO"    # Eindeutiger Prefix für ONDO Orders
+
+# ONDO spezifisches Risk Management
+risk:
+  tp_pct: 0.01        # 1% TP
+  sl_pct: 0.005       # 0.5% SL
+
+# Strengerer Trendfilter für ONDO (volatil)
+trend_filter:
+  adx_threshold: 25.0
+  ema_distance_threshold: 0.3
+
+# System
+system:
+  debug: True

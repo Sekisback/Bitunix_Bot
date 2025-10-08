@@ -4,20 +4,50 @@
     <meta charset="UTF-8">
     <title>Bitunix Bot Control</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% if running %}
+    <script>
+        setInterval(function() { window.location.reload(); }, 5000);
+    </script>
+    {% endif %}
 </head>
 <body>
-    <h1>Bitunix Trading Bot</h1>
+    <h1>Bitunix Trading Bot – EMA Touch</h1>
 
     <p>Status: 
-        <strong style="color: {{ 'green' if running else 'red' }}">
-            {{ "läuft" if running else "gestoppt" }}
+        <strong class="{{ 'green' if running else 'red' }}">
+            {{ "läuft mit Config " + config if running else "gestoppt" }}
         </strong>
     </p>
 
-    <a href="{{ url_for('start') }}"><button>Start</button></a>
+    {% if not running %}
+    <form method="post">
+        <label>Config auswählen:</label>
+        <select name="config" required>
+            <option value="" disabled selected>-- Bitte wählen --</option>
+            {% for cfg in configs %}
+                <option value="{{ cfg }}">{{ cfg }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit">Starten</button>
+    </form>
+    {% else %}
     <a href="{{ url_for('stop') }}"><button>Stop</button></a>
+    {% endif %}
 
-    <h2>Logs (letzte 50 Zeilen)</h2>
-    <pre>{{ "\n".join(logs) }}</pre>
+    <h2>Logs</h2>
+    <pre id="logbox">{{ "\n".join(logs) }}</pre>
+
+    {% if running %}
+    <script>
+        // Seite alle 5 Sekunden aktualisieren
+        setInterval(function() { window.location.reload(); }, 5000);
+
+        // automatisch nach unten scrollen
+        window.onload = function() {
+            var logBox = document.getElementById("logbox");
+            logBox.scrollTop = logBox.scrollHeight;
+        };
+    </script>
+    {% endif %}
 </body>
 </html>

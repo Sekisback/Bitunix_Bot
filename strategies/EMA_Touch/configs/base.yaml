@@ -1,0 +1,41 @@
+# ===================================================
+# EMA21 Touch Strategy - Basis Konfiguration
+# Diese Werte gelten für alle Coins als Standard
+# Coin-spezifische Configs überschreiben diese Werte
+# ===================================================
+
+# Trading Parameter
+trading:
+  interval: "1m"
+  leverage: 3
+  dry_run: true
+  fixed_qty: null                 # Feste Menge in Coins (null = automatisch berechnen)
+  client_id_prefix: "EMA_TOUCH"   # Prefix für Order-IDs (z.B. "EMA_TOUCH_ONDO_1234567890")
+
+# Risk Management
+risk:
+  tp_pct: 0.01                    # Take Profit: 1% auf Margin
+  sl_pct: 0.005                   # Stop Loss: 0.5% auf Margin
+  fee_pct: 0.00042                # Gebühren pro Trade-Seite (Worstcase immer Taker)
+
+# Indikatoren
+indicators:
+  ema_fast: 21
+  ema_slow: 50
+  ema_trend: 200
+
+# Trendfilter ADX
+trend_filter:
+  use_filter: true
+  adx_threshold: 23.0
+  ema_distance_threshold: 0.2
+
+# Entry Parameter EMA Spread (ema_fast, ema_slow)
+entry:
+  touch_threshold_pct: 0.05
+
+# System
+system:
+  timezone_offset: 2
+  debug: false
+  backtest_bars: 200
