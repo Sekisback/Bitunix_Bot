@@ -1,20 +1,22 @@
+from pathlib import Path
 from flask import Flask, render_template, redirect, url_for, request
 import subprocess, os, signal
 from datetime import datetime
 
 app = Flask(__name__)
 
-# Basis-Pfade
-# Basisverzeichnis ermitteln, egal wo app.py liegt
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Verzeichnisse robust bestimmen
+WEB_DIR   = Path(__file__).resolve().parent          # .../Bitunix_Trading_Bot/web
+ROOT_DIR  = WEB_DIR.parent                           # .../Bitunix_Trading_Bot
+STRAT_DIR = ROOT_DIR / "strategies" / "EMA_Touch"
 
-# Sub-Ordner definieren
-bot_path = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "bot.py")
-configs_dir = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "configs")
-logs_dir = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "logs")
+bot_path     = STRAT_DIR / "bot.py"
+configs_dir  = STRAT_DIR / "configs"
+logs_dir     = STRAT_DIR / "logs"
+logs_dir.mkdir(parents=True, exist_ok=True)
 
-print("BASE_DIR:", BASE_DIR)
-print("Configs in:", configs_dir, "->", os.listdir(configs_dir))
+print("ROOT_DIR:", ROOT_DIR)
+print("Configs in:", configs_dir, "->", list(configs_dir.glob("*.yaml")))
 
 process = None
 current_config = None
@@ -24,44 +26,31 @@ def index():
     global process, current_config
     running = process is not None and process.poll() is None
 
-    # Config-Dateien im Ordner "configs" einlesen (ohne base.yaml)
+    # Config-Dateien (ohne base.yaml)
     available_configs = []
-    if os.path.exists(configs_dir):
+    if configs_dir.exists():
         available_configs = [
-            f for f in os.listdir(configs_dir)
-            if os.path.isfile(os.path.join(configs_dir, f))
-            and f.endswith(".yaml")
-            and f.lower() != "base.yaml"
+            p.name for p in configs_dir.glob("*.yaml")
+            if p.name.lower() != "base.yaml"
         ]
 
-
     if request.method == "POST":
-        # ausgewählte Config-Datei übernehmen
         selected_file = request.form.get("config")
         if selected_file:
-            current_config = os.path.splitext(selected_file)[0]  # Name ohne .yaml
-
+            current_config = Path(selected_file).stem  # Name ohne .yaml
             if process is None or process.poll() is not None:
-                # Log-Datei für die Config erstellen
-                log_file = os.path.join(
-                    logs_dir,
-                    f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
-                )
+                log_file = logs_dir / f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
                 f = open(log_file, "a")
                 process = subprocess.Popen(
-                    ["python3", bot_path, "--config", current_config],
+                    ["python3", str(bot_path), "--config", current_config],
                     stdout=f, stderr=f, preexec_fn=os.setsid
                 )
         return redirect(url_for("index"))
 
-    # aktuelles Logfile für die Config laden
     logs = []
     if current_config:
-        log_file = os.path.join(
-            logs_dir,
-            f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
-        )
-        if os.path.exists(log_file):
+        log_file = logs_dir / f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
+        if log_file.exists():
             with open(log_file, "r") as f:
                 logs = f.read().splitlines()[-49:]
 
