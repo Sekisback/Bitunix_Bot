@@ -51,8 +51,9 @@ def index():
     if current_config:
         log_file = logs_dir / f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
         if log_file.exists():
-            with open(log_file, "r") as f:
-                logs = f.read().splitlines()[-49:]
+            with open(log_file, "r", errors="ignore") as f:
+                logs = f.read().splitlines()
+
 
     return render_template("index.html",
                            running=running,

@@ -1,53 +1,78 @@
 <!DOCTYPE html>
 <html lang="de">
 <head>
-    <meta charset="UTF-8">
-    <title>Bitunix Bot Control</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    {% if running %}
-    <script>
-        setInterval(function() { window.location.reload(); }, 5000);
-    </script>
-    {% endif %}
+  <meta charset="UTF-8" />
+  <title>Bitunix Bot Control</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <h1>Bitunix Trading Bot – EMA Touch</h1>
+  <h1>Bitunix Trading Bot – EMA Touch</h1>
 
-    <p>Status: 
-        <strong class="{{ 'green' if running else 'red' }}">
-            {{ "läuft mit Config " + config if running else "gestoppt" }}
-        </strong>
-    </p>
+  <p>Status:
+    <strong class="{{ 'green' if running else 'red' }}">
+      {{ "läuft mit Config " + config if running else "gestoppt" }}
+    </strong>
+  </p>
 
+  <div class="controls">
     {% if not running %}
-    <form method="post">
+      <form method="post" class="form-inline">
         <label>Config auswählen:</label>
         <select name="config" required>
-            <option value="" disabled selected>-- Bitte wählen --</option>
-            {% for cfg in configs %}
-                <option value="{{ cfg }}">{{ cfg }}</option>
-            {% endfor %}
+          <option value="" disabled selected>-- Bitte wählen --</option>
+          {% for cfg in configs %}
+            <option value="{{ cfg }}">{{ cfg }}</option>
+          {% endfor %}
         </select>
         <button type="submit">Starten</button>
-    </form>
+      </form>
     {% else %}
-    <a href="{{ url_for('stop') }}"><button>Stop</button></a>
+      <a href="{{ url_for('stop') }}"><button>Stop</button></a>
     {% endif %}
 
-    <h2>Logs</h2>
-    <pre id="logbox">{{ "\n".join(logs) }}</pre>
+    <div class="log-actions" aria-label="Log-Steuerung">
+      <button type="button" onclick="toTop()">Zum Anfang</button>
+      <button type="button" onclick="toBottom()">Zum Ende</button>
+    </div>
+  </div>
 
-    {% if running %}
-    <script>
-        // Seite alle 5 Sekunden aktualisieren
-        setInterval(function() { window.location.reload(); }, 5000);
+  <pre id="logbox">{{ "\n".join(logs) }}</pre>
 
-        // automatisch nach unten scrollen
-        window.onload = function() {
-            var logBox = document.getElementById("logbox");
-            logBox.scrollTop = logBox.scrollHeight;
-        };
-    </script>
-    {% endif %}
+  <script>
+    // Scroll-Steuerung & Zustand
+    const box = document.getElementById('logbox');
+
+    function toTop(){ box.scrollTop = 0; }
+    function toBottom(){ box.scrollTop = box.scrollHeight; }
+
+    function atBottom(el){
+      return el.scrollHeight - el.scrollTop - el.clientHeight < 10;
+    }
+
+    // Nach Laden: Scrollzustand wiederherstellen
+    window.addEventListener('load', () => {
+      const stick = sessionStorage.getItem('stickBottom') === '1';
+      const saved = parseInt(sessionStorage.getItem('logScroll') || '0', 10);
+      if (stick) toBottom();
+      else if (!isNaN(saved)) box.scrollTop = saved;
+    });
+
+    // Beim Scrollen: Zustand merken
+    box.addEventListener('scroll', () => {
+      sessionStorage.setItem('logScroll', box.scrollTop);
+      sessionStorage.setItem('stickBottom', atBottom(box) ? '1' : '0');
+    });
+  </script>
+
+  {% if running %}
+  <script>
+    // Auto-Reload nur wenn laufend; Scroll-Zustand bleibt erhalten
+    setInterval(function () {
+      sessionStorage.setItem('logScroll', box.scrollTop);
+      sessionStorage.setItem('stickBottom', (box.scrollHeight - box.scrollTop - box.clientHeight < 10) ? '1' : '0');
+      window.location.reload();
+    }, 5000);
+  </script>
+  {% endif %}
 </body>
 </html>
