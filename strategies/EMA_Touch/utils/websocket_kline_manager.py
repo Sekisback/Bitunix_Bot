@@ -132,22 +132,35 @@ class WebSocketKlineManager:
             # Parse Kline
             parsed_kline = self._parse_kline(message)
             
-            # Zu Buffer hinzufügen
-            self.kline_buffer.append(parsed_kline)
+            # === FIX: Kerze updaten statt append ===
+            # Timestamp auf Minute runden (entferne Sekunden)
+            kline_minute = parsed_kline['timestamp'].replace(second=0, microsecond=0)
+            
+            # Prüfe ob diese Minute schon im Buffer ist
+            if len(self.kline_buffer) > 0:
+                last_kline = self.kline_buffer[-1]
+                last_minute = last_kline['timestamp'].replace(second=0, microsecond=0)
+                
+                if kline_minute == last_minute:
+                    # UPDATE: Gleiche Minute → ersetze letzte Kerze
+                    parsed_kline['timestamp'] = kline_minute  # Timestamp auf :00 setzen
+                    self.kline_buffer[-1] = parsed_kline
+                    logging.debug(f"🔄 Update: {kline_minute.strftime('%H:%M')} | C: {parsed_kline['close']:.5f}")
+                else:
+                    # NEUE Kerze: Andere Minute → append
+                    parsed_kline['timestamp'] = kline_minute
+                    self.kline_buffer.append(parsed_kline)
+                    logging.info(f"✨ Neue Kerze: {kline_minute.strftime('%H:%M')} | C: {parsed_kline['close']:.5f}")
+            else:
+                # Buffer leer → erste Kerze
+                parsed_kline['timestamp'] = kline_minute
+                self.kline_buffer.append(parsed_kline)
             
             # Stats
             self.klines_received += 1
             self.last_kline_time = parsed_kline['timestamp']
             
-            # Nur alle 60 Sekunden loggen (neue Minute)
-            if parsed_kline['timestamp'].second == 0 or not hasattr(self, '_last_log_minute'):
-                logging.debug(
-                    f"📊 Kerze: {parsed_kline['timestamp'].strftime('%H:%M')} | "
-                    f"C: {parsed_kline['close']:.5f} | Buffer: {len(self.kline_buffer)}"
-                )
-                self._last_log_minute = parsed_kline['timestamp'].minute
-            
-            # User-Callback triggern
+            # User-Callback triggern (bei jeder Änderung)
             if self.on_kline_callback:
                 try:
                     await self.on_kline_callback(parsed_kline, self.get_dataframe())

@@ -125,7 +125,20 @@ class TradingBot:
                 self.config['indicators']['ema_slow'],
                 self.config['indicators']['ema_trend']
             ])
-            
+
+
+            # # === DEBUG: Letzte 5 Kerzen anzeigen ===
+            # if self.debug and kline['timestamp'].second == 0:  # Nur alle 60 Sek
+            #     logging.info("=" * 60)
+            #     logging.info("📊 LETZTE 5 KERZEN IM BUFFER:")
+            #     for idx, row in df_analysis.tail(5).iterrows():
+            #         logging.info(
+            #             f"   {idx.strftime('%H:%M:%S')} | "
+            #             f"O:{row['open']:.5f} H:{row['high']:.5f} "
+            #             f"L:{row['low']:.5f} C:{row['close']:.5f}"
+            #         )
+            #     logging.info("=" * 60)
+                        
             # === DEBUG: EMA-Werte anzeigen ===
             if self.debug:
                 current_price = kline['close']
@@ -137,8 +150,26 @@ class TradingBot:
                 distance_to_ema21 = abs((current_price - ema21) / ema21 * 100)
                 touch_threshold = self.config['entry']['touch_threshold_pct']
                 
+                # Abstand in USDT
+                distance_usdt = abs(current_price - ema21)
+                
+                # Richtung bestimmen
+                if current_price > ema21:
+                    direction = "⬆️"  # Preis über EMA
+                else:
+                    direction = "⬇️"  # Preis unter EMA
+                
+                # Touch-Zone berechnen
+                touch_range_percent = touch_threshold  # z.B. 0.05
+                touch_lower = ema21 * (1 - touch_range_percent / 100)
+                touch_upper = ema21 * (1 + touch_range_percent / 100)
+                
                 logging.info(f"💹 Preis:       {current_price:.5f}")
-                logging.info(f"📈 EMA21:       {ema21:.5f} | Abstand: {distance_to_ema21:.3f}% (Touch bei <{touch_threshold}%)")
+                logging.info(
+                    f"📈 EMA21:       {ema21:.5f} | "
+                    f"Abstand: {direction} {distance_usdt:.5f} USDT | "
+                    f"Touch-Zone: {touch_lower:.5f}-{touch_upper:.5f}"
+                )
                 logging.info(f"📊 EMA50:       {ema50:.5f}")
                 logging.info(f"📉 EMA200:      {ema200:.5f}")
                 
