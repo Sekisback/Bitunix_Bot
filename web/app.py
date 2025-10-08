@@ -5,10 +5,16 @@ from datetime import datetime
 app = Flask(__name__)
 
 # Basis-Pfade
-BASE_DIR = "/media/archive/Python/Bitunix_Trading_Bot/strategies/EMA_Touch"
-bot_path = os.path.join(BASE_DIR, "bot.py")
-configs_dir = os.path.join(BASE_DIR, "configs")
-logs_dir = os.path.join(BASE_DIR, "logs")
+# Basisverzeichnis ermitteln, egal wo app.py liegt
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Sub-Ordner definieren
+bot_path = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "bot.py")
+configs_dir = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "configs")
+logs_dir = os.path.join(BASE_DIR, "strategies", "EMA_Touch", "logs")
+
+print("BASE_DIR:", BASE_DIR)
+print("Configs in:", configs_dir, "->", os.listdir(configs_dir))
 
 process = None
 current_config = None
