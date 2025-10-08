@@ -41,11 +41,11 @@ def check_ema21_touch(df: pd.DataFrame,
     
     # Seite bestimmen (von welcher Seite nähert sich Preis?)
     if current_price >= ema_val:
-        side = "from_above"  # Preis kommt von oben
+        side = " oben"  # Preis kommt von oben
     else:
-        side = "from_below"  # Preis kommt von unten
+        side = " unten"  # Preis kommt von unten
     
-    logging.debug(f"EMA{ema_fast} Touch Check: Preis={current_price:.5f}, EMA={ema_val:.5f}, Abstand={distance_pct:.3f}%, Touch={is_touch}")
+    #logging.debug(f"EMA{ema_fast} Touch Check: Preis={current_price:.5f}, EMA={ema_val:.5f}, Abstand={distance_pct:.3f}%, Touch={is_touch}")
     
     return {
         "is_touch": is_touch,

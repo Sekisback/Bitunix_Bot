@@ -10,6 +10,7 @@ from .calculations import (
     calc_trade_parameters,
     generate_client_id
 )
+from .websocket_kline_manager import WebSocketKlineManager
 
 __all__ = [
     'load_config',
@@ -19,5 +20,6 @@ __all__ = [
     'setup_logging',
     'get_symbol_info',
     'calc_trade_parameters',
-    'generate_client_id'
+    'generate_client_id',
+    'WebSocketKlineManager'
 ]

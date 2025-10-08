@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-EMA21 Touch Trading Bot
-Nutzt modulare Komponenten für saubere Struktur
+EMA21 Touch Trading Bot - WebSocket Version
+Event-basiert statt Polling
 """
 
 import asyncio
@@ -9,8 +9,11 @@ import argparse
 import sys
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
 import pandas as pd
+import logging
+
+# WebSocket-Library auf WARNING setzen
+logging.getLogger('websockets').setLevel(logging.WARNING)
 
 # Working Directory auf Root setzen
 root_dir = Path(__file__).parent.parent.parent
@@ -31,7 +34,8 @@ from utils import (
     setup_logging,
     fetch_historical_klines,
     calc_trade_parameters,
-    generate_client_id
+    generate_client_id,
+    WebSocketKlineManager
 )
 from indicators import add_emas
 from signals import generate_trade_signal
@@ -43,219 +47,321 @@ from trading import (
     setup_account
 )
 
-import logging
 
-
-async def bot_loop(config: dict, client_pri, client_pub):
+class TradingBot:
     """
-    Hauptschleife - läuft kontinuierlich
-    
-    Args:
-        config: Config Dictionary
-        client_pri: Private API Client
-        client_pub: Public API Client
+    Trading Bot mit WebSocket-Integration
     """
-    symbol = config['symbol']
-    interval = config['trading']['interval']
-    leverage = config['trading']['leverage']
-    dry_run = config['trading']['dry_run']
-    debug = config['system']['debug']
-    backtest_bars = config['system']['backtest_bars']
     
-    logging.info("🤖 Bot Loop gestartet - Endlos-Modus")
-    
-    active_position = False
-    
-    try:
-        while True:
-            try:
-                if debug:
-                    logging.debug("=" * 60)
-                    logging.debug(f"Iteration: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    logging.debug("=" * 60)
-                
-                # === Position Check ===
-                try:
-                    if dry_run:
-                        # Im DRY RUN keine Position Check
-                        active_position = False
-                    else:
-                        has_position = check_active_position(
-                            client_pri,
-                            symbol=symbol,
-                            margin_coin="USDT"
-                        )
-                        
-                        if has_position:
-                            if not active_position:
-                                logging.info("🔒 Aktive Position erkannt!")
-                                print("🔒 Aktive Position erkannt - warte auf Schließung...")
-                                active_position = True
-                            else:
-                                if debug:
-                                    logging.info("⏳ Position noch aktiv - warte...")
-                            
-                            await asyncio.sleep(10)
-                            continue
-                        else:
-                            if active_position:
-                                logging.info("✅ Position geschlossen!")
-                                print("✅ Position geschlossen - suche neue Signale...")
-                            active_position = False
-                            
-                except Exception as e:
-                    logging.error(f"❌ Fehler beim Position-Check: {e}")
-                    if dry_run:
-                        active_position = False
-                    else:
-                        await asyncio.sleep(30)
-                        continue
-                
-                if debug:
-                    logging.debug("Keine aktive Position - suche Signal...")
-                
-                # === Kerzendaten laden ===
-                df = fetch_historical_klines(
-                    client_pub,
-                    symbol,
-                    interval,
-                    limit=backtest_bars,
-                    timezone_offset=config['system']['timezone_offset']
+    def __init__(self, config: dict, client_pri, client_pub):
+        """
+        Args:
+            config: Config Dictionary
+            client_pri: Private API Client
+            client_pub: Public API Client
+        """
+        self.config = config
+        self.client_pri = client_pri
+        self.client_pub = client_pub
+        
+        # Bot State
+        self.active_position = False
+        self.ws_manager = None
+        
+        # Config auslesen
+        self.symbol = config['symbol']
+        self.interval = config['trading']['interval']
+        self.leverage = config['trading']['leverage']
+        self.dry_run = config['trading']['dry_run']
+        self.debug = config['system']['debug']
+        
+    async def on_new_kline(self, kline: dict, df: pd.DataFrame):
+        """
+        Callback bei neuer Kerze vom WebSocket
+        
+        Args:
+            kline: Dict mit aktueller Kerze
+            df: DataFrame mit allen gepufferten Kerzen
+        """
+        try:
+            if self.debug:
+                logging.info("=" * 60)
+                logging.info(f"🕯️  Neue Kerze: {kline['timestamp'].strftime('%H:%M:%S')} | C: {kline['close']:.5f}")
+            
+            # === Position Check ===
+            if not self.dry_run:
+                has_position = check_active_position(
+                    self.client_pri,
+                    symbol=self.symbol,
+                    margin_coin="USDT"
                 )
                 
-                # === Aktuellen Preis holen ===
-                ticker_data = client_pub.get_tickers(symbol)
-                if isinstance(ticker_data, list) and ticker_data:
-                    current_price = float(ticker_data[0].get("last", 0.0))
-                elif isinstance(ticker_data, dict):
-                    current_price = float(ticker_data.get("last", 0.0))
+                if has_position:
+                    if not self.active_position:
+                        logging.info("🔒 Aktive Position erkannt!")
+                        self.active_position = True
+                    else:
+                        if self.debug:
+                            logging.info("⏳ Position noch aktiv - überspringe")
+                    return
                 else:
-                    raise ValueError("Keine Preisdaten erhalten")
+                    if self.active_position:
+                        logging.info("✅ Position geschlossen!")
+                        self.active_position = False
+            
+            # === Genug Daten vorhanden? ===
+            if len(df) < self.config['system']['backtest_bars']:
+                if self.debug:
+                    logging.info(f"⏳ Warte auf genug Kerzen: {len(df)}/{self.config['system']['backtest_bars']}")
+                    logging.info("=" * 60)
+                return
+            
+            # DataFrame kopieren für Berechnungen
+            df_analysis = df.copy()
+            
+            # === EMAs berechnen ===
+            df_analysis = add_emas(df_analysis, periods=[
+                self.config['indicators']['ema_fast'],
+                self.config['indicators']['ema_slow'],
+                self.config['indicators']['ema_trend']
+            ])
+            
+            # === DEBUG: EMA-Werte anzeigen ===
+            if self.debug:
+                current_price = kline['close']
+                ema21 = df_analysis[f"ema_{self.config['indicators']['ema_fast']}"].iloc[-1]
+                ema50 = df_analysis[f"ema_{self.config['indicators']['ema_slow']}"].iloc[-1]
+                ema200 = df_analysis[f"ema_{self.config['indicators']['ema_trend']}"].iloc[-1]
                 
-                # === Aktuelle Kerze simulieren ===
-                last_timestamp = df.index[-1]
+                # Abstand zu EMA21
+                distance_to_ema21 = abs((current_price - ema21) / ema21 * 100)
+                touch_threshold = self.config['entry']['touch_threshold_pct']
                 
-                # Interval zu Timedelta
-                interval_map = {
-                    "1m": timedelta(minutes=1),
-                    "3m": timedelta(minutes=3),
-                    "5m": timedelta(minutes=5),
-                    "15m": timedelta(minutes=15),
-                    "30m": timedelta(minutes=30),
-                    "1h": timedelta(hours=1),
-                    "2h": timedelta(hours=2),
-                    "4h": timedelta(hours=4),
-                    "1d": timedelta(days=1)
-                }
+                logging.info(f"💹 Preis:       {current_price:.5f}")
+                logging.info(f"📈 EMA21:       {ema21:.5f} | Abstand: {distance_to_ema21:.3f}% (Touch bei <{touch_threshold}%)")
+                logging.info(f"📊 EMA50:       {ema50:.5f}")
+                logging.info(f"📉 EMA200:      {ema200:.5f}")
                 
-                delta = interval_map.get(interval, timedelta(minutes=1))
-                current_time = last_timestamp + delta
+                # Hierarchie prüfen
+                if ema21 > ema50 > ema200:
+                    logging.info(f"🟢 Hierarchie:  LONG (21 > 50 > 200)")
+                elif ema21 < ema50 < ema200:
+                    logging.info(f"🔴 Hierarchie:  SHORT (21 < 50 < 200)")
+                else:
+                    logging.info(f"⚪ Hierarchie:  Keine klare Richtung")
+            
+            # === Account Balance (nur einmal pro Minute cachen) ===
+            current_minute = kline['timestamp'].replace(second=0, microsecond=0)
+            
+            if not hasattr(self, '_cached_balance') or \
+            not hasattr(self, '_cache_time') or \
+            self._cache_time != current_minute:
                 
-                # Neue Kerze mit aktuellem Preis
-                new_row = pd.DataFrame({
-                    'open': [df['close'].iloc[-1]],
-                    'high': [max(df['close'].iloc[-1], current_price)],
-                    'low': [min(df['close'].iloc[-1], current_price)],
-                    'close': [current_price],
-                    'volume': [0.0],
-                    'turnover': [0.0]
-                }, index=[current_time])
+                # Neu abrufen
+                self._cached_balance = get_account_balance(self.client_pri, margin_coin="USDT")
+                self._cache_time = current_minute
                 
-                df = pd.concat([df, new_row])
+                if self.debug:
+                    logging.info(f"💰 Guthaben:    {self._cached_balance:.2f} USDT (aktualisiert)")
+            
+            balance = self._cached_balance
+            
+            if balance <= 0:
+                logging.error("❌ Kein Guthaben!")
+                if self.debug:
+                    logging.info("=" * 60)
+                return
+            
+            # === Trade Parameter berechnen (nur einmal cachen) ===
+            current_price = kline['close']
+            fixed_qty = self.config['trading'].get('fixed_qty', None)
+            
+            if not hasattr(self, '_cached_qty') or \
+            not hasattr(self, '_qty_cache_time') or \
+            self._qty_cache_time != current_minute:
                 
-                # === EMAs berechnen ===
-                df = add_emas(df, periods=[
-                    config['indicators']['ema_fast'],
-                    config['indicators']['ema_slow'],
-                    config['indicators']['ema_trend']
-                ])
-                
-                # === Account Balance ===
-                balance = get_account_balance(client_pri, margin_coin="USDT")
-                if balance <= 0:
-                    logging.error("❌ Kein Guthaben!")
-                    await asyncio.sleep(60)
-                    continue
-                
-                # === Trade Parameter berechnen ===
-                fixed_qty = config['trading'].get('fixed_qty', None)
-                qty = calc_trade_parameters(  # ← Nur noch qty
-                    client_pub=client_pub,
-                    symbol=symbol,
+                # Neu berechnen
+                self._cached_qty = calc_trade_parameters(
+                    client_pub=self.client_pub,
+                    symbol=self.symbol,
                     balance=balance,
                     current_price=current_price,
-                    leverage=leverage,
-                    tp_pct=config['risk']['tp_pct'],
-                    sl_pct=config['risk']['sl_pct'],
-                    total_fees=config['risk']['fee_pct'] * 2,
+                    leverage=self.leverage,
+                    tp_pct=self.config['risk']['tp_pct'],
+                    sl_pct=self.config['risk']['sl_pct'],
+                    total_fees=self.config['risk']['fee_pct'] * 2,
                     fixed_qty=fixed_qty
                 )
+                self._qty_cache_time = current_minute
+            
+            qty = self._cached_qty
+            
+            # === Signal generieren ===
+            signal = generate_trade_signal(df_analysis, self.config)
+
+            # === WICHTIG: Touch-Status immer loggen ===
+            if self.debug:
+                # Touch-Check durchführen (auch wenn kein Signal)
+                from signals.ema21_touch import check_ema21_touch
                 
-                # === Signal generieren ===
-                signal = generate_trade_signal(df, config)
+                touch = check_ema21_touch(
+                    df_analysis,
+                    ema_fast=self.config['indicators']['ema_fast'],
+                    threshold_pct=self.config['entry']['touch_threshold_pct']
+                )
                 
-                # === Order platzieren ===
-                if signal["signal"]:
-                    # IMMER loggen bei Signal!
-                    logging.info(f"✅ Signal gefunden: {signal['signal']}")
+                if touch["is_touch"]:
+                    logging.info("=" * 60)
+                    logging.info(f"👆 EMA21 TOUCH ERKANNT!")
+                    logging.info(f"📏 Abstand:     {touch['distance_pct']:.3f}%")
+                    logging.info(f"📍 Touch Side:  {touch['side']}")
                     
-                    if dry_run:
-                        # DRY RUN Mode
-                        place_order_dryrun(
+                    # Prüfe warum kein Trade
+                    if not signal["signal"]:
+                        # Mehrzeilig formatieren für bessere Lesbarkeit
+                        reason_parts = signal['reason'].split(': ', 1)  # Split am ersten ":"
+                        
+                        if len(reason_parts) == 2:
+                            # Hat Format "Setup Status: Details"
+                            logging.info(f"⛔ BLOCKIERT:   {reason_parts[0]}:")
+                            
+                            # Details aufsplitten am " | "
+                            details = reason_parts[1].split(' | ')
+                            for detail in details:
+                                logging.info(f"               • {detail}")
+                        else:
+                            # Fallback: normal ausgeben
+                            logging.info(f"⛔ BLOCKIERT:   {signal['reason']}")
+                    else:
+                        logging.info(f"✅ SIGNAL:      {signal['signal']}")
+                    
+                    logging.info("=" * 60)
+                            
+            # === Order platzieren ===
+            if signal["signal"]:
+                logging.info("=" * 60)
+                logging.info(f"✅ SIGNAL GEFUNDEN: {signal['signal']}")
+                logging.info(f"📋 Grund: {signal['reason']}")
+                logging.info("=" * 60)
+                
+                if self.dry_run:
+                    # DRY RUN Mode
+                    place_order_dryrun(
+                        signal=signal,
+                        qty=qty,
+                        balance=balance,
+                        leverage=self.leverage,
+                        fee_pct=self.config['risk']['fee_pct']
+                    )
+                else:
+                    # LIVE Mode
+                    logging.info("🚀 LIVE MODE - Platziere Order...")
+                    print(f"🚀 LIVE MODE - Platziere {signal['signal']} Order...")
+                    
+                    client_id = generate_client_id(
+                        self.config['trading']['client_id_prefix']
+                    )
+                    
+                    try:
+                        place_order_live(
+                            client_pri=self.client_pri,
                             signal=signal,
                             qty=qty,
-                            balance=balance,
-                            leverage=leverage,
-                            fee_pct=config['risk']['fee_pct']
+                            client_id=client_id,
+                            symbol=self.symbol
                         )
-                    else:
-                        # LIVE Mode
-                        logging.info("🚀 LIVE MODE - Platziere Order...")
-                        print(f"🚀 LIVE MODE - Platziere {signal['signal']} Order...")
+                        print("✅ Order erfolgreich platziert!")
                         
-                        # Client ID generieren
-                        client_id = generate_client_id(
-                            config['trading']['client_id_prefix']
-                        )
+                        # Nach Order: Position als aktiv markieren
+                        self.active_position = True
                         
-                        try:
-                            place_order_live(
-                                client_pri=client_pri,
-                                signal=signal,
-                                qty=qty,
-                                client_id=client_id,
-                                symbol=symbol
-                            )
-                            print("✅ Order erfolgreich platziert!")
-                        except Exception as e:
-                            logging.error(f"❌ Order fehlgeschlagen: {e}")
-                            print(f"❌ Order fehlgeschlagen: {e}")
+                    except Exception as e:
+                        logging.error(f"❌ Order fehlgeschlagen: {e}")
+                        print(f"❌ Order fehlgeschlagen: {e}")
+            # else:
+            #     if self.debug:
+            #         logging.info(f"❌ Kein Signal: {signal['reason']}")
+            #         logging.info("=" * 60)
                     
-                    # Nach Signal warten
-                    await asyncio.sleep(60)
-                else:
-                    if debug:
-                        logging.info(f"Kein Signal: {signal['reason']}")
-                    await asyncio.sleep(10)
-                
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logging.error(f"❌ Fehler in Iteration: {e}")
-                logging.exception("Traceback:")
-                await asyncio.sleep(30)
+        except Exception as e:
+            logging.error(f"❌ Fehler in Kline-Handler: {e}")
+            logging.exception("Traceback:")
+
+
+    async def initialize_historical_data(self):
+        """
+        Lädt initiale historische Daten via REST
+        Füllt damit den WebSocket-Buffer vor
+        """
+        logging.info("📊 Lade historische Daten...")
+        
+        try:
+            df_historical = fetch_historical_klines(
+                self.client_pub,
+                self.symbol,
+                self.interval,
+                limit=self.config['system']['backtest_bars'],
+                timezone_offset=self.config['system']['timezone_offset']
+            )
+            
+            logging.info(f"✅ {len(df_historical)} historische Kerzen geladen")
+            
+            # Historische Kerzen in WebSocket-Buffer einfügen
+            for idx, row in df_historical.iterrows():
+                kline_dict = {
+                    'timestamp': idx,
+                    'open': row['open'],
+                    'high': row['high'],
+                    'low': row['low'],
+                    'close': row['close'],
+                    'volume': row['volume'],
+                    'turnover': row.get('turnover', 0.0)
+                }
+                self.ws_manager.kline_buffer.append(kline_dict)
+            
+            logging.info(f"✅ Buffer initialisiert mit {len(self.ws_manager.kline_buffer)} Kerzen")
+            
+        except Exception as e:
+            logging.error(f"❌ Fehler beim Laden historischer Daten: {e}")
+            raise
     
-    except asyncio.CancelledError:
-        logging.info("\n" + "=" * 60)
-        logging.info("🛑 Bot wird gestoppt...")
-        logging.info("=" * 60)
-    except KeyboardInterrupt:
-        logging.info("\n" + "=" * 60)
-        logging.info("🛑 Bot gestoppt durch Benutzer (CTRL+C)")
-        logging.info("=" * 60)
-    finally:
-        logging.info("👋 Bot beendet - Auf Wiedersehen!")
-        logging.info("=" * 60)
+    async def start(self):
+        """
+        Startet den Bot
+        """
+        logging.info("🤖 Bot startet...")
+        
+        try:
+            # 1. WebSocket-Manager erstellen (noch nicht starten!)
+            self.ws_manager = WebSocketKlineManager(
+                symbol=self.symbol,
+                interval=self.interval,
+                buffer_size=self.config['system']['backtest_bars'],
+                timezone_offset=self.config['system']['timezone_offset'],
+                price_type="market",
+                on_kline_callback=self.on_new_kline
+            )
+            
+            # 2. Historische Daten laden und Buffer füllen
+            await self.initialize_historical_data()
+            
+            # 3. WebSocket starten (jetzt mit gefülltem Buffer)
+            logging.info("🔌 Starte WebSocket-Verbindung...")
+            await self.ws_manager.start()
+            
+        except asyncio.CancelledError:
+            logging.info("\n" + "=" * 60)
+            logging.info("🛑 Bot wird gestoppt...")
+            logging.info("=" * 60)
+        except KeyboardInterrupt:
+            logging.info("\n" + "=" * 60)
+            logging.info("🛑 Bot gestoppt durch Benutzer (CTRL+C)")
+            logging.info("=" * 60)
+        finally:
+            if self.ws_manager:
+                self.ws_manager.stop()
+            logging.info("👋 Bot beendet - Auf Wiedersehen!")
+            logging.info("=" * 60)
 
 
 async def main():
@@ -263,13 +369,13 @@ async def main():
     
     # === Command Line Arguments ===
     parser = argparse.ArgumentParser(
-        description='EMA21 Touch Trading Bot',
+        description='EMA21 Touch Trading Bot - WebSocket Version',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-                Beispiele:
-                python bot.py --config ONDOUSDT
-                python bot.py --config XRPUSDT
-                python bot.py --config BTCUSDT
+Beispiele:
+    python bot.py --config ONDOUSDT
+    python bot.py --config XRPUSDT
+    python bot.py --config BTCUSDT
         """
     )
     parser.add_argument(
@@ -282,11 +388,10 @@ async def main():
     
     # === Config laden ===
     print("\n" + "=" * 60)
-    print("🤖 EMA21 Touch Trading Bot")
+    print("🤖 EMA21 Touch Trading Bot - WebSocket Version")
     print("=" * 60)
     
     try:
-        # Wechsel zu Strategy Ordner für Config Load
         strategy_dir = Path(__file__).parent
         os.chdir(strategy_dir)
         config = load_config(args.config)
@@ -298,22 +403,18 @@ async def main():
     symbol = config['symbol']
     fixed_qty = config['trading'].get('fixed_qty', None)
     
-    # Qty Anzeige
-    if fixed_qty is not None:
-        qty_display = f"Fix: {fixed_qty} Coins"
-    else:
-        qty_display = "Automatisch berechnet"
+    qty_display = f"Fix: {fixed_qty} Coins" if fixed_qty else "Automatisch berechnet"
     
     print(f"Symbol:       {symbol}")
     print(f"Interval:     {config['trading']['interval']}")
     print(f"Leverage:     {config['trading']['leverage']}x")
     print(f"Menge:        {qty_display}")
-    
     print(f"ADX Filter:   {config['trend_filter']['adx_threshold']}")
     print(f"EMA Distance: {config['trend_filter']['ema_distance_threshold']}%")
     print(f"TP / SL:      {config['risk']['tp_pct']*100}% / {config['risk']['sl_pct']*100}%")
     print(f"Mode:         {'DRY RUN' if config['trading']['dry_run'] else 'LIVE MODE ⚠️'}")
     print(f"Debug:        {'AN' if config['system']['debug'] else 'AUS'}")
+    print(f"Data Source:  WebSocket (Echtzeit)")
     print("=" * 60)
     
     # === Logging Setup ===
@@ -323,7 +424,12 @@ async def main():
         debug=config['system']['debug']
     )
     
-    # === Log Config Settings auch ins Log ===
+    # Core-Module auf WARNING setzen (keine Debug-Spam)
+    logging.getLogger('core.open_api_ws_future_public').setLevel(logging.WARNING)
+    logging.getLogger('websockets').setLevel(logging.WARNING)
+
+
+    # === Log Config Settings ===
     logging.info("=" * 60)
     logging.info("⚙️ Bot Konfiguration")
     logging.info("=" * 60)
@@ -338,6 +444,7 @@ async def main():
     logging.info(f"Trendfilter:    {'AN' if config['trend_filter']['use_filter'] else 'AUS'}")
     logging.info(f"Debug Mode:     {'AN' if config['system']['debug'] else 'AUS'}")
     logging.info(f"Mode:           {'DRY RUN' if config['trading']['dry_run'] else 'LIVE MODE ⚠️'}")
+    logging.info(f"Data Source:    WebSocket")
     logging.info("=" * 60)
     
     # === API Clients ===
@@ -361,18 +468,19 @@ async def main():
     
     print("Bot startet... Drücke CTRL+C zum Beenden\n")
     
-    # === Bot starten ===
+    # === Bot erstellen und starten ===
+    bot = TradingBot(config, client_pri, client_pub)
+    
     try:
-        await bot_loop(config, client_pri, client_pub)
+        await bot.start()
     except KeyboardInterrupt:
-        pass  # Wird bereits in bot_loop() behandelt
+        pass
 
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        # Sauberer Exit ohne Traceback
         print("\n" + "=" * 60)
         print("🛑 Bot gestoppt durch Benutzer")
         print("=" * 60)

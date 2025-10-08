@@ -5,8 +5,8 @@ import time
 import websockets
 import ssl
 from typing import Dict, Any, List
-from open_api_ws_sign import get_auth_ws_future
-from config import Config
+from core.open_api_ws_sign import get_auth_ws_future
+from core.config import Config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')

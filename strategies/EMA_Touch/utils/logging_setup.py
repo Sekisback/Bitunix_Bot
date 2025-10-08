@@ -37,9 +37,10 @@ def setup_logging(symbol: str, strategy: str = "EMA_Touch", debug: bool = False)
     
     # Format für beide Handler (mit Symbol)
     formatter = logging.Formatter(
-        f'%(asctime)s | {symbol} | %(levelname)s | %(message)s'
+        #f'%(asctime)s | {symbol} | %(levelname)s | %(message)s'
+        f'%(asctime)s | %(message)s'
     )
-    
+        
     # Console Handler - nur für wichtige Meldungen (praktisch aus)
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.CRITICAL)

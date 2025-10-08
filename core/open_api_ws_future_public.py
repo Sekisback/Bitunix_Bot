@@ -4,16 +4,21 @@ import logging
 import ssl
 import time
 import websockets
-from typing import Dict, Any, List
-from config import Config
+from typing import Dict, Any, List, Callable, Optional
+from core.config import Config
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
 class OpenApiWsFuturePublic:
-    def __init__(self, config: Config):
+    def __init__(self, config: Config, on_message_callback: Optional[Callable] = None):
         """
         Initialize OpenApiWsFuturePublic class
+        
+        Args:
+            config: Config object
+            on_message_callback: Optional callback function for all messages
+                                 Signature: async def callback(channel, data)
         """
         self.config = config
         self.base_url = config.public_ws_uri
@@ -25,6 +30,20 @@ class OpenApiWsFuturePublic:
         self.stop_ping = False
         self.heartbeat_interval = 3  # Heartbeat interval, in seconds
         
+        # Callback system
+        self.on_message_callback = on_message_callback
+        self.channel_callbacks = {}  # Channel-specific callbacks
+        
+    def set_channel_callback(self, channel: str, callback: Callable):
+        """
+        Register a callback for a specific channel
+        
+        Args:
+            channel: Channel name (e.g., "market_kline_1min", "trade", "ticker")
+            callback: Async callback function(data)
+        """
+        self.channel_callbacks[channel] = callback
+        
     async def _send_ping(self):
         """Send heartbeat message"""
         while not self.stop_ping:
@@ -32,7 +51,7 @@ class OpenApiWsFuturePublic:
                 if self.websocket and self.is_connected:
                     msg = json.dumps({"op": "ping", "ping": int(round(time.time()))})
                     await self.websocket.send(msg)
-                    logging.debug("Sent ping message")
+                    #logging.debug("Sent ping message")
                 await asyncio.sleep(self.heartbeat_interval)
             except websockets.exceptions.ConnectionClosedError:
                 logging.info("WebSocket connection closed by remote server")
@@ -63,7 +82,9 @@ class OpenApiWsFuturePublic:
                 [
                     {"symbol": "BTCUSDT", "ch": "trade"},
                     {"symbol": "BTCUSDT", "ch": "ticker"},
-                    {"symbol": "BTCUSDT", "ch": "depth_book1"}
+                    {"symbol": "BTCUSDT", "ch": "depth_book1"},
+                    {"symbol": "BTCUSDT", "ch": "market_kline_1min"},
+                    {"symbol": "BTCUSDT", "ch": "mark_kline_5min"}
                 ]
         """
         try:
@@ -85,36 +106,80 @@ class OpenApiWsFuturePublic:
             data = json.loads(message)
 
             # Handle heartbeat response
-            if data.get('op') == 'ping':
-                logging.info(f"Received message: {data}")
+            if data.get('op') == 'pong':
+                logging.debug("Received pong response")
                 return
 
-            # Define allowed public channels
+            # Handle subscription confirmation
+            if data.get('op') == 'subscribe':
+                logging.debug(f"Subscription confirmed: {data}")
+                return
+
+            # Get channel name
+            channel = data.get('ch', '')
+            
+            # Define allowed public channels (inkl. kline patterns)
             allowed_channels = ['depth_book1', 'trade', 'ticker']
-            if 'ch' in data and data['ch'] in allowed_channels:
+            
+            # Check if kline channel (market_kline_* or mark_kline_*)
+            is_kline = channel.startswith('market_kline_') or channel.startswith('mark_kline_')
+            
+            if channel in allowed_channels or is_kline:
                 await self.message_queue.put(data)
+                
+                # Trigger general callback if registered
+                if self.on_message_callback:
+                    try:
+                        # Pass entire message (includes ts, symbol, data)
+                        await self.on_message_callback(channel, data)
+                    except Exception as e:
+                        logging.error(f"Callback error: {e}")
+                
+                # Trigger channel-specific callback if registered
+                if channel in self.channel_callbacks:
+                    try:
+                        # Pass entire message for klines (needs ts)
+                        await self.channel_callbacks[channel](data)
+                    except Exception as e:
+                        logging.error(f"Channel callback error for {channel}: {e}")
+                        
         except json.JSONDecodeError:
             logging.error("Failed to parse message")
         except Exception as e:
             logging.error(f"Error handling message: {e}")
             
     async def _process_message(self, message: Dict[str, Any]):
-        """Process messages in the message queue"""
+        """Process messages in the message queue (default handler)"""
         try:
-            if message['ch'] == 'trade':
+            channel = message.get('ch', '')
+            
+            if channel == 'trade':
                 # Handle real-time trade data
                 trade_data = message['data']
                 logging.info(f"Received trade data: {trade_data}")
                 
-            elif message['ch'] == 'ticker':
+            elif channel == 'ticker':
                 # Handle 24-hour market data
                 ticker_data = message['data']
                 logging.info(f"Received 24h ticker: {ticker_data}")
                 
-            elif message['ch'] == 'depth_book1':
+            elif channel == 'depth_book1':
                 # Handle order book depth data
                 depth_data = message['data']
                 logging.info(f"Received order book depth: {depth_data}")
+                
+            elif channel.startswith('market_kline_') or channel.startswith('mark_kline_'):
+                # Handle kline/candlestick data
+                kline_data = message.get('data', {})
+                symbol = message.get('symbol', 'N/A')
+                ts = message.get('ts', 0)
+                
+                # logging.debug(  # ← DEBUG = nur wenn Debug-Mode AN
+                #     f"Received kline ({channel}): "
+                #     f"{symbol} @ {ts} | "
+                #     f"O:{kline_data.get('o')} H:{kline_data.get('h')} "
+                #     f"L:{kline_data.get('l')} C:{kline_data.get('c')}"
+                # )
                 
         except Exception as e:
             logging.error(f"Error processing message: {e}")
@@ -197,31 +262,3 @@ class OpenApiWsFuturePublic:
             # Wait for tasks to be cancelled
             await asyncio.gather(self.ping_task, consume_task, return_exceptions=True)
 
-async def main():
-    """Main function example"""
-    # Load configuration
-    config = Config()
-    
-    # Create client
-    client = OpenApiWsFuturePublic(config)
-    
-    # Start client
-    client_task = asyncio.create_task(client.start())
-    
-    # Wait for connection to be established
-    await asyncio.sleep(2)
-    
-    # Subscribe to channels
-    await client.subscribe([
-        {"symbol": "BTCUSDT", "ch": "trade"},
-        {"symbol": "BTCUSDT", "ch": "ticker"},
-        {"symbol": "BTCUSDT", "ch": "depth_book1"}
-    ])
-    
-    try:
-        await client_task
-    except KeyboardInterrupt:
-        logging.info("Program interrupted by user")
-
-if __name__ == "__main__":
-    asyncio.run(main()) 
