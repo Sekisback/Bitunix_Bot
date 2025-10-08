@@ -25,4 +25,4 @@ trend_filter:
 
 # System
 system:
-  debug: True
+  debug: False

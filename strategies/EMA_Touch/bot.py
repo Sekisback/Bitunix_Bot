@@ -70,9 +70,9 @@ async def bot_loop(config: dict, client_pri, client_pub):
         while True:
             try:
                 if debug:
-                    logging.info("=" * 60)
-                    logging.info(f"🔄 Iteration: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    logging.info("=" * 60)
+                    logging.debug("=" * 60)
+                    logging.debug(f"Iteration: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                    logging.debug("=" * 60)
                 
                 # === Position Check ===
                 try:
@@ -112,7 +112,7 @@ async def bot_loop(config: dict, client_pri, client_pub):
                         continue
                 
                 if debug:
-                    logging.info("🔍 Keine aktive Position - suche Signal...")
+                    logging.debug("Keine aktive Position - suche Signal...")
                 
                 # === Kerzendaten laden ===
                 df = fetch_historical_klines(
