@@ -33,6 +33,7 @@
     <div class="log-actions" aria-label="Log-Steuerung">
       <button type="button" onclick="toTop()">Zum Anfang</button>
       <button type="button" onclick="toBottom()">Zum Ende</button>
+      <button type="button" onclick="location.reload()">Aktualisieren</button>
     </div>
   </div>
 
@@ -63,16 +64,5 @@
       sessionStorage.setItem('stickBottom', atBottom(box) ? '1' : '0');
     });
   </script>
-
-  {% if running %}
-  <script>
-    // Auto-Reload nur wenn laufend; Scroll-Zustand bleibt erhalten
-    setInterval(function () {
-      sessionStorage.setItem('logScroll', box.scrollTop);
-      sessionStorage.setItem('stickBottom', (box.scrollHeight - box.scrollTop - box.clientHeight < 10) ? '1' : '0');
-      window.location.reload();
-    }, 5000);
-  </script>
-  {% endif %}
 </body>
 </html>
