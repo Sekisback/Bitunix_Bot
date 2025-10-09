@@ -1,5 +1,5 @@
 config.yaml
 .venv
-__pycache__/
-logs/
+**/__pycache__/
+**/logs/
 test_files/
