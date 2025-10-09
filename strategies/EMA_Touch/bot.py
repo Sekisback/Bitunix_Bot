@@ -381,8 +381,7 @@ class TradingBot:
                                         
                 else:
                     # LIVE Mode
-                    logging.info("🚀 LIVE MODE - Platziere Order...")
-                    print(f"🚀 LIVE MODE - Platziere {signal['signal']} Order...")
+                    logging.info(f"🚀 LIVE MODE - Platziere {signal['signal']} Order...")
                     
                     client_id = generate_client_id(
                         self.config['trading']['client_id_prefix']
@@ -396,7 +395,6 @@ class TradingBot:
                             client_id=client_id,
                             symbol=self.symbol
                         )
-                        print("✅ Order erfolgreich platziert!")
                         
                         # Nach Order: Position als aktiv markieren
                         self.active_position = True
@@ -508,11 +506,7 @@ Beispiele:
     
     args = parser.parse_args()
     
-    # === Config laden ===
-    print("\n" + "=" * 60)
-    print("🤖 EMA21 Touch Trading Bot - WebSocket Version")
-    print("=" * 60)
-    
+    # === Config laden ===  
     try:
         strategy_dir = Path(__file__).parent
         os.chdir(strategy_dir)
@@ -526,19 +520,7 @@ Beispiele:
     fixed_qty = config['trading'].get('fixed_qty', None)
     
     qty_display = f"Fix: {fixed_qty} Coins" if fixed_qty else "Automatisch berechnet"
-    
-    print(f"Symbol:       {symbol}")
-    print(f"Interval:     {config['trading']['interval']}")
-    print(f"Leverage:     {config['trading']['leverage']}x")
-    print(f"Menge:        {qty_display}")
-    print(f"ADX Filter:   {config['trend_filter']['adx_threshold']}")
-    print(f"EMA Distance: {config['trend_filter']['ema_distance_threshold']}%")
-    print(f"TP / SL:      {config['risk']['tp_pct']*100}% / {config['risk']['sl_pct']*100}%")
-    print(f"Mode:         {'DRY RUN' if config['trading']['dry_run'] else 'LIVE MODE ⚠️'}")
-    print(f"Debug:        {'AN' if config['system']['debug'] else 'AUS'}")
-    print(f"Data Source:  WebSocket (Echtzeit)")
-    print("=" * 60)
-    
+       
     # === Logging Setup ===
     setup_logging(
         symbol=symbol,
@@ -555,18 +537,18 @@ Beispiele:
     logging.info("=" * 60)
     logging.info("⚙️ Bot Konfiguration")
     logging.info("=" * 60)
-    logging.info(f"Symbol:         {symbol}")
-    logging.info(f"Interval:       {config['trading']['interval']}")
-    logging.info(f"Leverage:       {config['trading']['leverage']}x")
-    logging.info(f"Menge:          {qty_display}")
-    logging.info(f"TP / SL:        {config['risk']['tp_pct']*100}% / {config['risk']['sl_pct']*100}%")
-    logging.info(f"ADX Threshold:  {config['trend_filter']['adx_threshold']}")
-    logging.info(f"EMA Distance:   {config['trend_filter']['ema_distance_threshold']}%")
-    logging.info(f"Touch Threshold: {config['entry']['touch_threshold_pct']}%")
-    logging.info(f"Trendfilter:    {'AN' if config['trend_filter']['use_filter'] else 'AUS'}")
-    logging.info(f"Debug Mode:     {'AN' if config['system']['debug'] else 'AUS'}")
-    logging.info(f"Mode:           {'DRY RUN' if config['trading']['dry_run'] else 'LIVE MODE ⚠️'}")
-    logging.info(f"Data Source:    WebSocket")
+    logging.info(f"Symbol         : {symbol}")
+    logging.info(f"Interval       : {config['trading']['interval']}")
+    logging.info(f"Leverage       : {config['trading']['leverage']}x")
+    logging.info(f"Menge          : {qty_display}")
+    logging.info(f"TP / SL        : {config['risk']['tp_pct']*100}% / {config['risk']['sl_pct']*100}%")
+    logging.info(f"ADX Threshold  : {config['trend_filter']['adx_threshold']}")
+    logging.info(f"EMA Distance   : {config['trend_filter']['ema_distance_threshold']}%")
+    logging.info(f"Touch Toleranz : {config['entry']['touch_threshold_pct']}%")
+    logging.info(f"Trendfilter    : {'AN' if config['trend_filter']['use_filter'] else 'AUS'}")
+    logging.info(f"Debug Mode     : {'AN' if config['system']['debug'] else 'AUS'}")
+    logging.info(f"Mode           : {'DRY RUN' if config['trading']['dry_run'] else 'LIVE MODE ⚠️'}")
+    logging.info(f"Data Source    : WebSocket")
     logging.info("=" * 60)
     
     # === API Clients ===
