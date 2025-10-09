@@ -3,26 +3,27 @@
 # Überschreibt nur die Werte aus base.yaml die anders sein sollen
 # ===================================================
 
-symbol: "BTCUSDT"
+# Coin-Symbol (muss exakt wie bei Bitunix angegeben werden)
+symbol: "BTCUSDT"                      
 
-# ONDO spezifische Trading Parameter
+# Trading Parameter
 trading:
-  leverage: 3
-  interval: "1m"
-  dry_run: true
-  fixed_qty: 0.03                       # Feste Menge in Coins (null = automatisch berechnen)
-  client_id_prefix: "EMA_TOUCH_ONDO"    # Eindeutiger Prefix für ONDO Orders
+  interval: "1m"                        # Timeframe der Kerzen (1m, 5m, 15m, 1h, 4h, 1d)
+  leverage: 3                           # Hebel (2-20x) - höher = mehr Risiko, mehr Gewinn/Verlust
+  dry_run: true                         # true = Simulation ohne echte Orders, false = LIVE Trading
+  fixed_qty: none                       # Fixe Menge in Coins (z.B. 100) oder null = automatisch berechnen basierend auf Balance
+  client_id_prefix: "EMA_TOUCH_BTC "    # Prefix für Order-IDs zur Identifikation (z.B. "EMA_TOUCH_ONDO_1234567890")
 
-# ONDO spezifisches Risk Management
+# Risk Management
 risk:
-  tp_pct: 0.01        # 1% TP
-  sl_pct: 0.005       # 0.5% SL
+  tp_pct: 0.01                          # Take Profit: 1% Gewinn auf eingesetzte Margin
+  sl_pct: 0.005                         # Stop Loss: 0.5% Verlust auf Margin
 
-# Strengerer Trendfilter für ONDO (volatil)
+# Trendfilter verhindert Trades in schwachen/seitwärts Märkten
 trend_filter:
-  adx_threshold: 25.0
-  ema_distance_threshold: 0.3
+  adx_threshold: 25.0                   # Minimaler ADX-Wert für Trade (>25 = starker Trend, <20 = schwach)
+  ema_distance_threshold: 0.3           # Minimaler Abstand zwischen EMA21 und EMA50 in %
 
 # System
 system:
-  debug: true
+  debug: false                          # true = Ausführliche Logs, false = nur wichtige Events

@@ -118,7 +118,6 @@ class TradingBot:
                             logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
                             logging.info(f"Gewinn: +{profit:.2f} USDT")
                             logging.info("=" * 60)
-                            print(f"✅ [DRY RUN] TP erreicht! Gewinn: +{profit:.2f} USDT")
                             position_closed = True
                         
                         # LONG: SL erreicht?
@@ -129,7 +128,6 @@ class TradingBot:
                             logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
                             logging.info(f"Verlust: -{loss:.2f} USDT")
                             logging.info("=" * 60)
-                            print(f"❌ [DRY RUN] SL erreicht! Verlust: -{loss:.2f} USDT")
                             position_closed = True
                     
                     else:  # SHORT
@@ -141,7 +139,6 @@ class TradingBot:
                             logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
                             logging.info(f"Gewinn: +{profit:.2f} USDT")
                             logging.info("=" * 60)
-                            print(f"✅ [DRY RUN] TP erreicht! Gewinn: +{profit:.2f} USDT")
                             position_closed = True
                         
                         # SHORT: SL erreicht?
@@ -152,13 +149,12 @@ class TradingBot:
                             logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
                             logging.info(f"Verlust: -{loss:.2f} USDT")
                             logging.info("=" * 60)
-                            print(f"❌ [DRY RUN] SL erreicht! Verlust: -{loss:.2f} USDT")
                             position_closed = True
                     
                     if position_closed:
                         # Position zurücksetzen
                         self.sim_position['active'] = False
-                        print("✅ Simulierte Position geschlossen - suche neue Signale...")
+                        logging.info("✅ Simulierte Position geschlossen - suche neue Signale...")
                     else:
                         # Position noch aktiv - überspringe Rest
                         if self.debug:
@@ -382,9 +378,7 @@ class TradingBot:
                     self.sim_position['tp'] = signal['tp']
                     self.sim_position['sl'] = signal['sl']
                     self.sim_position['qty'] = qty
-                    
-                    print(f"🔒 [DRY RUN] Simulierte {signal['signal']} Position eröffnet - tracke TP/SL...")
-                    
+                                        
                 else:
                     # LIVE Mode
                     logging.info("🚀 LIVE MODE - Platziere Order...")

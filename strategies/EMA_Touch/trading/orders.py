@@ -27,21 +27,7 @@ def place_order_dryrun(signal: dict, qty: float, balance: float, leverage: int, 
     position_size = qty * entry
     # Margin benötigt (= Kontogröße für diese Position)
     margin_used = position_size / leverage
-    
-    # Ausgabe in Console UND Log
-    print("\n" + "=" * 60)
-    print("🎯 DRY RUN - ORDER SIMULATION")
-    print("=" * 60)
-    print(f"Signal:         {side}")
-    print(f"Grund:          {signal['reason']}")
-    print(f"Entry Preis:    {entry:.5f} USDT")
-    print(f"Menge:          {qty} Coins")
-    print(f"Position Größe: {position_size:.2f} USDT")
-    print(f"Hebel:          {leverage}x")
-    print(f"Margin:         {margin_used:.2f} USDT")
-    print(f"Take Profit:    {tp:.5f} USDT")
-    print(f"Stop Loss:      {sl:.5f} USDT")
-    
+       
     # Berechne Gewinn/Verlust auf MARGIN-Basis (nicht Position)
     if side == "LONG":
         # Preisdifferenz zu TP/SL
@@ -68,15 +54,8 @@ def place_order_dryrun(signal: dict, qty: float, balance: float, leverage: int, 
         # Prozent bezogen auf MARGIN
         profit_pct = (profit_usdt / margin_used) * 100
         loss_pct = (loss_usdt / margin_used) * 100
-    
-    print(f"Potentieller Gewinn: +{profit_usdt:.2f} USDT ({profit_pct:.2f}% auf Margin)")
-    print(f"Potentieller Verlust: -{loss_usdt:.2f} USDT ({loss_pct:.2f}% auf Margin)")
-    print(f"Risk/Reward Ratio: 1:{(profit_usdt/loss_usdt):.2f}")
-    print("=" * 60)
-    print("⚠️ DRY RUN MODE - Keine echte Order platziert!")
-    print("=" * 60 + "\n")
-    
-    # Auch ins Log schreiben    
+       
+    # ins Log schreiben    
     logging.info("=" * 60)
     logging.info("🎯 DRY RUN - ORDER SIMULATION")
     logging.info("=" * 60)
