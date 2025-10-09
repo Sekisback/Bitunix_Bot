@@ -79,16 +79,26 @@ def generate_trade_signal(df: pd.DataFrame, config: dict) -> dict:
     # Gesamte Gebühren
     total_fees = fee_pct * 2
     
+    # Aktueller Preis für Logs
+    current_price = df['close'].iloc[-1]
+    
+    # EMA Touch prüfen (ZUERST!)
+    touch = check_ema21_touch(df, ema_fast=ema_fast, threshold_pct=touch_threshold)
+    
+    # Wenn KEIN Touch → direkt abbrechen (kein Log nötig)
+    if not touch["is_touch"]:
+        return {
+            "signal": None,
+            "reason": "Kein EMA Touch",
+            "tp": None,
+            "sl": None,
+            "entry_price": None
+        }
+    
+    # === AB HIER: Touch wurde erkannt! ===
+    
     # EMA Hierarchie prüfen
     hierarchy = check_ema_hierarchy(df, fast=ema_fast, slow=ema_slow, trend=ema_trend, debug=False)
-    
-    # Setup Info für Meldungen
-    if hierarchy["long_ok"]:
-        setup_type = "Long Setup vorhanden, aber"
-    elif hierarchy["short_ok"]:
-        setup_type = "Short Setup vorhanden, aber"
-    else:
-        setup_type = "Kein Setup vorhanden, und"
     
     # Trendfilter prüfen (wenn aktiviert)
     if use_filter:
@@ -100,66 +110,27 @@ def generate_trade_signal(df: pd.DataFrame, config: dict) -> dict:
             ema_slow=ema_slow
         )
         
+        # Trend zu schwach → Return (Logging passiert in bot.py)
         if not trend_check["is_trending"]:
             return {
                 "signal": None,
-                "reason": f"{setup_type} Trend zu schwach: {trend_check['reason']}",
+                "reason": f"Trend zu schwach",
                 "tp": None,
                 "sl": None,
                 "entry_price": None
             }
     
-    # EMA Touch prüfen
-    touch = check_ema21_touch(df, ema_fast=ema_fast, threshold_pct=touch_threshold)
-
-    # Touch-Logging (NUR wenn Touch erkannt)
-    if touch["is_touch"]:
-        # Übersetze Side für Log
-        side_display = {
-            "from_above": "⬇️ von oben",
-            "from_below": "⬆️ von unten"
-        }.get(touch['side'], touch['side'])
-        
-        logging.info("=" * 60)
-        logging.info("👆 EMA21 TOUCH ERKANNT!")
-        logging.info("=" * 60)
-        logging.info(f"Touch Side:     {side_display}")
-        logging.info(f"Distanz:        {touch['distance_pct']:.3f}%")
-        logging.info(f"Long möglich:   {'✅ JA' if hierarchy['long_ok'] else '❌ NEIN'}")
-        logging.info(f"Short möglich:  {'✅ JA' if hierarchy['short_ok'] else '❌ NEIN'}")
-        logging.info(f"EMA{ema_fast}:  {hierarchy[f'ema{ema_fast}']:.5f}")
-        logging.info(f"EMA{ema_slow}:  {hierarchy[f'ema{ema_slow}']:.5f}")
-        logging.info(f"EMA{ema_trend}: {hierarchy[f'ema{ema_trend}']:.5f}")
-        logging.info(f"Hierarchie:     {hierarchy['reason']}")
-        
-        # Prüfe Trade-Bedingungen
-        if hierarchy["long_ok"] and touch["side"] == "from_above":
-            logging.info("➡️ LONG Signal wird generiert!")
-        elif hierarchy["short_ok"] and touch["side"] == "from_below":
-            logging.info("➡️ SHORT Signal wird generiert!")
-        else:
-            logging.info("❌ KEIN Signal - Bedingungen:")
-            if not hierarchy["long_ok"] and not hierarchy["short_ok"]:
-                logging.info("   • EMA Hierarchie nicht erfüllt")
-            if hierarchy["long_ok"] and touch["side"] != "from_above":
-                logging.info(f"   • Long Setup, aber Touch von unten (braucht Touch von oben)")
-            if hierarchy["short_ok"] and touch["side"] != "from_below":
-                logging.info(f"   • Short Setup, aber Touch von oben (braucht Touch von unten)")
-        
-        logging.info("=" * 60)
+    # === Hierarchie OK? ===
     
-    # Aktueller Preis
-    current_price = df['close'].iloc[-1]
-    # EMA50 für Stop Loss
-    ema_slow_val = df[f'ema_{ema_slow}'].iloc[-1]
-    
-    # TP/SL berechnen
-    fee_impact = total_fees
-    tp_price_pct = (tp_pct / leverage) + fee_impact
-    sl_price_pct = (sl_pct / leverage) + fee_impact
-    
-    # === LONG SIGNAL ===
-    if hierarchy["long_ok"] and touch["is_touch"] and touch["side"] == "from_above":
+    # Long möglich?
+    if hierarchy["long_ok"] and touch["side"] == "from_above":
+        # LONG SIGNAL!
+        ema_slow_val = df[f'ema_{ema_slow}'].iloc[-1]
+        
+        fee_impact = total_fees
+        tp_price_pct = (tp_pct / leverage) + fee_impact
+        sl_price_pct = (sl_pct / leverage) + fee_impact
+        
         tp_price = current_price * (1 + tp_price_pct)
         sl_calculated = current_price * (1 - sl_price_pct)
         sl_price = max(ema_slow_val, sl_calculated)
@@ -172,8 +143,15 @@ def generate_trade_signal(df: pd.DataFrame, config: dict) -> dict:
             "entry_price": current_price
         }
     
-    # === SHORT SIGNAL ===
-    elif hierarchy["short_ok"] and touch["is_touch"] and touch["side"] == "from_below":
+    # Short möglich?
+    elif hierarchy["short_ok"] and touch["side"] == "from_below":
+        # SHORT SIGNAL!
+        ema_slow_val = df[f'ema_{ema_slow}'].iloc[-1]
+        
+        fee_impact = total_fees
+        tp_price_pct = (tp_pct / leverage) + fee_impact
+        sl_price_pct = (sl_pct / leverage) + fee_impact
+        
         tp_price = current_price * (1 - tp_price_pct)
         sl_calculated = current_price * (1 + sl_price_pct)
         sl_price = min(ema_slow_val, sl_calculated)
@@ -186,17 +164,19 @@ def generate_trade_signal(df: pd.DataFrame, config: dict) -> dict:
             "entry_price": current_price
         }
     
-    # === KEIN SIGNAL ===
+    # === Touch erkannt, aber falsche Richtung für Setup ===
     else:
-        reasons = []
-        if not hierarchy["long_ok"] and not hierarchy["short_ok"]:
-            reasons.append("Keine EMA Hierarchie")
-        if not touch["is_touch"]:
-            reasons.append(f"Kein EMA{ema_fast} Touch (Abstand: {touch['distance_pct']:.3f}%)")
+        # Warum kein Trade?
+        if hierarchy["long_ok"] and touch["side"] == "from_below":
+            reason = "Long-Setup, aber Touch von unten"
+        elif hierarchy["short_ok"] and touch["side"] == "from_above":
+            reason = "Short-Setup, aber Touch von oben"
+        else:
+            reason = "Keine EMA-Hierarchie"
         
         return {
             "signal": None,
-            "reason": " | ".join(reasons) if reasons else "Keine Bedingung erfüllt",
+            "reason": reason,
             "tp": None,
             "sl": None,
             "entry_price": None

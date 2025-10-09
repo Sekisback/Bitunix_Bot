@@ -68,6 +68,9 @@ class TradingBot:
         self.active_position = False
         self.ws_manager = None
         
+        # Touch-Logging Tracking (nur 1x pro Minute loggen)
+        self.last_touch_log_minute = None
+        
         # NEU: Simulierte Position für DRY RUN
         self.sim_position = {
             'active': False,
@@ -290,44 +293,70 @@ class TradingBot:
             
             # === Signal generieren ===
             signal = generate_trade_signal(df_analysis, self.config)
-
-            # === WICHTIG: Touch-Status immer loggen ===
-            if self.debug:
-                # Touch-Check durchführen (auch wenn kein Signal)
-                from signals.ema21_touch import check_ema21_touch
+            
+            # === Touch-Logging (nur 1x pro Minute) ===
+            current_minute = kline['timestamp'].replace(second=0, microsecond=0)
+            
+            # Prüfe ob Touch vorhanden war (auch wenn kein Signal)
+            from signals.ema21_touch import check_ema21_touch
+            touch = check_ema21_touch(
+                df_analysis,
+                ema_fast=self.config['indicators']['ema_fast'],
+                threshold_pct=self.config['entry']['touch_threshold_pct']
+            )
+            
+            # Nur loggen wenn: Touch erkannt UND noch nicht für diese Minute geloggt
+            if touch["is_touch"] and self.last_touch_log_minute != current_minute:
+                self.last_touch_log_minute = current_minute
                 
-                touch = check_ema21_touch(
-                    df_analysis,
-                    ema_fast=self.config['indicators']['ema_fast'],
-                    threshold_pct=self.config['entry']['touch_threshold_pct']
-                )
+                current_price = kline['close']
+                direction_text = "von oben ⬇️" if touch["side"] == "from_above" else "von unten ⬆️"
                 
-                if touch["is_touch"]:
-                    logging.info("=" * 60)
-                    logging.info(f"👆 EMA21 TOUCH ERKANNT!")
-                    logging.info(f"📏 Abstand:     {touch['distance_pct']:.3f}%")
-                    logging.info(f"📍 Touch Side:  {touch['side']}")
+                # Wenn Signal → Success-Log
+                if signal["signal"]:
+                    # Trend-Infos holen
+                    from indicators import check_trend_strength
+                    trend_check = check_trend_strength(
+                        df_analysis,
+                        adx_threshold=self.config['trend_filter']['adx_threshold'],
+                        ema_distance_threshold=self.config['trend_filter']['ema_distance_threshold'],
+                        ema_fast=self.config['indicators']['ema_fast'],
+                        ema_slow=self.config['indicators']['ema_slow']
+                    )
+                    logging.info(
+                        f"✅ {signal['signal']} Signal @ {current_price:.5f} | {direction_text} | "
+                        f"ADX {trend_check['adx']:.1f} | EMA-Abst. {trend_check['ema_distance']:.2f}%"
+                    )
+                else:
+                    # Kein Signal → Warum nicht?
+                    # Hole Trend-Infos für detaillierten Log
+                    from indicators import check_trend_strength
+                    trend_check = check_trend_strength(
+                        df_analysis,
+                        adx_threshold=self.config['trend_filter']['adx_threshold'],
+                        ema_distance_threshold=self.config['trend_filter']['ema_distance_threshold'],
+                        ema_fast=self.config['indicators']['ema_fast'],
+                        ema_slow=self.config['indicators']['ema_slow']
+                    )
                     
-                    # Prüfe warum kein Trade
-                    if not signal["signal"]:
-                        # Mehrzeilig formatieren für bessere Lesbarkeit
-                        reason_parts = signal['reason'].split(': ', 1)  # Split am ersten ":"
-                        
-                        if len(reason_parts) == 2:
-                            # Hat Format "Setup Status: Details"
-                            logging.info(f"⛔ BLOCKIERT:   {reason_parts[0]}:")
-                            
-                            # Details aufsplitten am " | "
-                            details = reason_parts[1].split(' | ')
-                            for detail in details:
-                                logging.info(f"               • {detail}")
-                        else:
-                            # Fallback: normal ausgeben
-                            logging.info(f"⛔ BLOCKIERT:   {signal['reason']}")
-                    else:
-                        logging.info(f"✅ SIGNAL:      {signal['signal']}")
+                    adx_val = trend_check['adx']
+                    ema_dist = trend_check['ema_distance']
+                    adx_threshold = self.config['trend_filter']['adx_threshold']
+                    ema_threshold = self.config['trend_filter']['ema_distance_threshold']
                     
-                    logging.info("=" * 60)
+                    # Blockier-Gründe sammeln
+                    blocks = []
+                    if adx_val < adx_threshold:
+                        blocks.append(f"ADX {adx_val:.1f} < {adx_threshold}")
+                    if ema_dist < ema_threshold:
+                        blocks.append(f"EMA-Abst. {ema_dist:.2f}% < {ema_threshold}%")
+                    
+                    # Hierarchie-Problem?
+                    if not blocks:
+                        blocks.append(signal['reason'])
+                    
+                    block_reason = " | ".join(blocks)
+                    logging.info(f"👆 EMA Touch @ {current_price:.5f} | {direction_text} | ⛔ {block_reason}")
                             
             # === Order platzieren ===
             if signal["signal"]:
