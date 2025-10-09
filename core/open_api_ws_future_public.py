@@ -34,6 +34,9 @@ class OpenApiWsFuturePublic:
         self.on_message_callback = on_message_callback
         self.channel_callbacks = {}  # Channel-specific callbacks
         
+        # NEU: Speichere Subscriptions für Re-Subscribe nach Reconnect
+        self.subscribed_channels = []
+        
     def set_channel_callback(self, channel: str, callback: Callable):
         """
         Register a callback for a specific channel
@@ -90,6 +93,9 @@ class OpenApiWsFuturePublic:
         try:
             if not self.websocket or not self.is_connected:
                 raise Exception("WebSocket not connected")
+            
+            # NEU: Speichere Channels für Re-Subscribe
+            self.subscribed_channels = channels
                 
             await self.websocket.send(json.dumps({
                 "op": "subscribe",
@@ -99,6 +105,22 @@ class OpenApiWsFuturePublic:
         except Exception as e:
             logging.error(f"Public subscription failed: {e}")
             raise
+    
+    async def _resubscribe(self):
+        """
+        NEU: Re-Subscribe zu gespeicherten Channels nach Reconnect
+        """
+        if self.subscribed_channels:
+            logging.info("🔄 Re-Subscribe nach Reconnect...")
+            await asyncio.sleep(1)  # Kurz warten nach Verbindung
+            try:
+                await self.websocket.send(json.dumps({
+                    "op": "subscribe",
+                    "args": self.subscribed_channels
+                }))
+                logging.info(f"✅ Re-Subscribe erfolgreich: {[c.get('ch') for c in self.subscribed_channels]}")
+            except Exception as e:
+                logging.error(f"❌ Re-Subscribe fehlgeschlagen: {e}")
             
     async def _handle_message(self, message: str):
         """Handle received messages"""
@@ -213,6 +235,10 @@ class OpenApiWsFuturePublic:
                     # Start heartbeat task
                     await self._start_ping()
                     
+                    # NEU: Re-Subscribe nach Reconnect
+                    if reconnect_attempts > 0:
+                        await self._resubscribe()
+                    
                     try:
                         async for message in websocket:
                             await self._handle_message(message)
@@ -261,4 +287,3 @@ class OpenApiWsFuturePublic:
             
             # Wait for tasks to be cancelled
             await asyncio.gather(self.ping_task, consume_task, return_exceptions=True)
-

@@ -68,6 +68,16 @@ class TradingBot:
         self.active_position = False
         self.ws_manager = None
         
+        # NEU: Simulierte Position für DRY RUN
+        self.sim_position = {
+            'active': False,
+            'side': None,      # "LONG" oder "SHORT"
+            'entry': None,     # Entry Preis
+            'tp': None,        # Take Profit
+            'sl': None,        # Stop Loss
+            'qty': None        # Menge
+        }
+        
         # Config auslesen
         self.symbol = config['symbol']
         self.interval = config['trading']['interval']
@@ -89,7 +99,71 @@ class TradingBot:
                 logging.info(f"🕯️  Neue Kerze: {kline['timestamp'].strftime('%H:%M:%S')} | C: {kline['close']:.5f}")
             
             # === Position Check ===
-            if not self.dry_run:
+            if self.dry_run:
+                # DRY RUN: Simulierte Position mit TP/SL Check
+                if self.sim_position['active']:
+                    current_price = kline['close']
+                    
+                    position_closed = False
+                    
+                    if self.sim_position['side'] == "LONG":
+                        # LONG: TP erreicht?
+                        if current_price >= self.sim_position['tp']:
+                            profit = (current_price - self.sim_position['entry']) * self.sim_position['qty']
+                            logging.info("=" * 60)
+                            logging.info(f"✅ [SIMULATION] TP erreicht!")
+                            logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
+                            logging.info(f"Gewinn: +{profit:.2f} USDT")
+                            logging.info("=" * 60)
+                            print(f"✅ [DRY RUN] TP erreicht! Gewinn: +{profit:.2f} USDT")
+                            position_closed = True
+                        
+                        # LONG: SL erreicht?
+                        elif current_price <= self.sim_position['sl']:
+                            loss = (self.sim_position['entry'] - current_price) * self.sim_position['qty']
+                            logging.info("=" * 60)
+                            logging.info(f"❌ [SIMULATION] SL erreicht!")
+                            logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
+                            logging.info(f"Verlust: -{loss:.2f} USDT")
+                            logging.info("=" * 60)
+                            print(f"❌ [DRY RUN] SL erreicht! Verlust: -{loss:.2f} USDT")
+                            position_closed = True
+                    
+                    else:  # SHORT
+                        # SHORT: TP erreicht?
+                        if current_price <= self.sim_position['tp']:
+                            profit = (self.sim_position['entry'] - current_price) * self.sim_position['qty']
+                            logging.info("=" * 60)
+                            logging.info(f"✅ [SIMULATION] TP erreicht!")
+                            logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
+                            logging.info(f"Gewinn: +{profit:.2f} USDT")
+                            logging.info("=" * 60)
+                            print(f"✅ [DRY RUN] TP erreicht! Gewinn: +{profit:.2f} USDT")
+                            position_closed = True
+                        
+                        # SHORT: SL erreicht?
+                        elif current_price >= self.sim_position['sl']:
+                            loss = (current_price - self.sim_position['entry']) * self.sim_position['qty']
+                            logging.info("=" * 60)
+                            logging.info(f"❌ [SIMULATION] SL erreicht!")
+                            logging.info(f"Entry: {self.sim_position['entry']:.5f} → Exit: {current_price:.5f}")
+                            logging.info(f"Verlust: -{loss:.2f} USDT")
+                            logging.info("=" * 60)
+                            print(f"❌ [DRY RUN] SL erreicht! Verlust: -{loss:.2f} USDT")
+                            position_closed = True
+                    
+                    if position_closed:
+                        # Position zurücksetzen
+                        self.sim_position['active'] = False
+                        print("✅ Simulierte Position geschlossen - suche neue Signale...")
+                    else:
+                        # Position noch aktiv - überspringe Rest
+                        if self.debug:
+                            logging.info(f"⏳ Simulierte Position läuft: Preis={current_price:.5f}, TP={self.sim_position['tp']:.5f}, SL={self.sim_position['sl']:.5f}")
+                        return
+            
+            else:
+                # LIVE MODE: Echte Position checken
                 has_position = check_active_position(
                     self.client_pri,
                     symbol=self.symbol,
@@ -126,19 +200,6 @@ class TradingBot:
                 self.config['indicators']['ema_trend']
             ])
 
-
-            # # === DEBUG: Letzte 5 Kerzen anzeigen ===
-            # if self.debug and kline['timestamp'].second == 0:  # Nur alle 60 Sek
-            #     logging.info("=" * 60)
-            #     logging.info("📊 LETZTE 5 KERZEN IM BUFFER:")
-            #     for idx, row in df_analysis.tail(5).iterrows():
-            #         logging.info(
-            #             f"   {idx.strftime('%H:%M:%S')} | "
-            #             f"O:{row['open']:.5f} H:{row['high']:.5f} "
-            #             f"L:{row['low']:.5f} C:{row['close']:.5f}"
-            #         )
-            #     logging.info("=" * 60)
-                        
             # === DEBUG: EMA-Werte anzeigen ===
             if self.debug:
                 current_price = kline['close']
@@ -284,6 +345,17 @@ class TradingBot:
                         leverage=self.leverage,
                         fee_pct=self.config['risk']['fee_pct']
                     )
+                    
+                    # NEU: Simulierte Position speichern
+                    self.sim_position['active'] = True
+                    self.sim_position['side'] = signal['signal']
+                    self.sim_position['entry'] = signal['entry_price']
+                    self.sim_position['tp'] = signal['tp']
+                    self.sim_position['sl'] = signal['sl']
+                    self.sim_position['qty'] = qty
+                    
+                    print(f"🔒 [DRY RUN] Simulierte {signal['signal']} Position eröffnet - tracke TP/SL...")
+                    
                 else:
                     # LIVE Mode
                     logging.info("🚀 LIVE MODE - Platziere Order...")
@@ -309,10 +381,6 @@ class TradingBot:
                     except Exception as e:
                         logging.error(f"❌ Order fehlgeschlagen: {e}")
                         print(f"❌ Order fehlgeschlagen: {e}")
-            # else:
-            #     if self.debug:
-            #         logging.info(f"❌ Kein Signal: {signal['reason']}")
-            #         logging.info("=" * 60)
                     
         except Exception as e:
             logging.error(f"❌ Fehler in Kline-Handler: {e}")
