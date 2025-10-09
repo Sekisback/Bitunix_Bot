@@ -6,36 +6,36 @@
 
 # Trading Parameter
 trading:
-  interval: "1m"
-  leverage: 3
-  dry_run: true
-  fixed_qty: null                 # Feste Menge in Coins (null = automatisch berechnen)
-  client_id_prefix: "EMA_TOUCH"   # Prefix für Order-IDs (z.B. "EMA_TOUCH_ONDO_1234567890")
+  interval: "1m"                        # Timeframe der Kerzen (1m, 5m, 15m, 1h, 4h, 1d)
+  leverage: 3                           # Hebel (2-20x) - höher = mehr Risiko, mehr Gewinn/Verlust
+  dry_run: true                         # true = Simulation ohne echte Orders, false = LIVE Trading
+  fixed_qty: null                       # Fixe Menge in Coins (z.B. 100) oder null = automatisch berechnen basierend auf Balance
+  client_id_prefix: "EMA_TOUCH"         # Prefix für Order-IDs zur Identifikation (z.B. "EMA_TOUCH_1234567890_abc123")
 
 # Risk Management
 risk:
-  tp_pct: 0.01                    # Take Profit: 1% auf Margin
-  sl_pct: 0.005                   # Stop Loss: 0.5% auf Margin
-  fee_pct: 0.00042                # Gebühren pro Trade-Seite (Worstcase immer Taker)
+  tp_pct: 0.01                          # Take Profit: 1% Gewinn auf eingesetzte Margin (bei 3x Hebel = ~3% vom Entry-Preis)
+  sl_pct: 0.005                         # Stop Loss: 0.5% Verlust auf Margin (bei 3x Hebel = ~1.5% vom Entry-Preis)
+  fee_pct: 0.00042                      # Trading Gebühren pro Seite (Entry/Exit) - 0.042% = Taker Fee bei Bitunix
 
 # Indikatoren
 indicators:
-  ema_fast: 21
-  ema_slow: 50
-  ema_trend: 200
+  ema_fast: 21                          # Schnelle EMA - Hauptlinie für Touch-Signal (niedriger = reaktiver)
+  ema_slow: 50                          # Mittlere EMA - für Hierarchie-Check und Stop-Loss Platzierung
+  ema_trend: 200                        # Langsame EMA - Trendfilter (Long wenn 21>50>200, Short wenn 21<50<200)
 
-# Trendfilter ADX
+# Trendfilter (verhindert Trades in schwachen/seitwärts Märkten)
 trend_filter:
-  use_filter: true
-  adx_threshold: 23.0
-  ema_distance_threshold: 0.2
+  use_filter: true                      # true = Trendfilter aktiv (empfohlen), false = Trade ohne Filter (riskanter)
+  adx_threshold: 23.0                   # Minimaler ADX-Wert für Trade (>25 = starker Trend, <20 = schwach/seitwärts)
+  ema_distance_threshold: 0.2           # Minimaler Abstand zwischen EMA21 und EMA50 in % (größer = stärkerer Trend)
 
-# Entry Parameter EMA Spread (ema_fast, ema_slow)
+# Entry Parameter (wann gilt ein Preis als "EMA Touch"?)
 entry:
-  touch_threshold_pct: 0.05
+  touch_threshold_pct: 0.05             # Max Abstand zur EMA21 in % (0.05 = 0.05% Abstand erlaubt, z.B. bei 1$ = 0.0005$)
 
 # System
 system:
-  timezone_offset: 2
-  debug: false
-  backtest_bars: 200
+  timezone_offset: 2                    # Zeitzone für Logs in Stunden (2 = MESZ/Europa, 1 = MEZ, 0 = UTC)
+  debug: false                          # true = Ausführliche Logs mit EMA-Werten etc., false = Nur wichtige Events
+  backtest_bars: 200                    # Anzahl historischer Kerzen die beim Start geladen werden (mind. 200 für EMA200)
