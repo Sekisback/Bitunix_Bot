@@ -10,7 +10,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-import time
 
 # === Root-Verzeichnis auf Projektroot setzen ===
 root_dir = Path(__file__).parent.parent.parent
@@ -23,17 +22,45 @@ sys.path.insert(0, str(Path(__file__).parent))
 from core.config import Config
 from core.open_api_http_future_private import OpenApiHttpFuturePrivate
 from core.open_api_http_future_public import OpenApiHttpFuturePublic
+from core.open_api_ws_future_public import OpenApiWsFuturePublic
+from core.open_api_ws_future_private import OpenApiWsFuturePrivate
 
 # === Strategie-Komponenten ===
 from manager.grid_manager import GridManager
+from manager.grid_lifecycle import GridState
+
+# === Account- Informationen ===
+from manager.account_sync import AccountSync
+
 from utils.config_loader import load_config
 from utils.logging_setup import setup_logging
 
-logger = logging.getLogger(__name__)
+
+# ============================================================
+# Logging-Tuning – Core-Module leiser, Bot sichtbar
+# ============================================================
+
+# Core-Module und Async-Libraries leise schalten
+for name in [
+    "core.open_api_ws_future_public",
+    "core.open_api_ws_future_private",
+    "core.open_api_http_future_public",
+    "core.open_api_http_future_private",
+    "websockets",
+    "asyncio",
+]:
+    logging.getLogger(name).setLevel(logging.ERROR)
+
+# Bot-Logger
+logger = logging.getLogger("GRID-BOT")
+logger.setLevel(logging.INFO)
 
 
+# ============================================================
+# GRID BOT
+# ============================================================
 class GridBot:
-    """GRID Bot Wrapper für Bitunix."""
+    """GRID Bot Wrapper für Bitunix mit Websocket-Integration"""
 
     def __init__(self, config: dict, client_pri, client_pub):
         self.config = config
@@ -44,61 +71,136 @@ class GridBot:
         self.update_interval = config["system"].get("update_interval", 5)
         self._stop = False
 
-        # API / Mock
-        if self.dry_run:
-            class MockExchange:
-                """Minimaler Fake-Client zum Testen ohne API-Zugriff."""
-                def place_order(self, **kwargs):
-                    print(f"[MOCK] Order: {kwargs}")
-                    return f"MOCK-{int(time.time())}"
-
-                def cancel_all(self, symbol: str):
-                    print(f"[MOCK] Cancel all orders for {symbol}")
-                    return True
-
-            self.exchange = MockExchange()
-        else:
-            self.exchange = client_pri
-
-        # Grid initialisieren
+        # === API Instanzen ===
+        self.exchange = client_pri if not self.dry_run else client_pub
         self.grid = GridManager(self.exchange, config)
 
+        # === Core Config laden ===
+        self.api_config = Config()
+
+        # === WebSocket-Clients ===
+        self.ws_public = OpenApiWsFuturePublic(
+            self.api_config, on_message_callback=self._on_public_ws
+        )
+        self.ws_private = OpenApiWsFuturePrivate(self.api_config)
+
+        # === Account-Information ===
+        self.account_sync = AccountSync(client_pri, self.symbol)
+    # ---------------------------------------------------------------------
+    # WebSocket-Callbacks
+    # ---------------------------------------------------------------------
+    async def _on_public_ws(self, channel, data):
+        """Callback für Public WS (Preisupdates)"""
+        if channel == "ticker":
+            price_data = data.get("data", {})
+            if not price_data:
+                return
+
+            last_price = float(price_data.get("la", price_data.get("c", 0)))
+            if last_price != getattr(self, "_last_price", None):
+                self._last_price = last_price
+                logger.info(f"💰 {self.symbol} @ {last_price:.4f}")
+                self.grid.update(last_price)
+
+    # ---------------------------------------------------------------------
+    # Hauptloop mit Auto-Recovery
+    # ---------------------------------------------------------------------
     async def run(self):
-        """Hauptloop des Grid-Bots."""
+        """Startet den GRID-Bot inklusive WebSocket-Clients, Lifecycle und Auto-Recovery."""
         logger.info("=" * 60)
         logger.info(f"🤖 Starte GRID Bot für {self.symbol}")
         logger.info("=" * 60)
-        start_price = self.config.get("start_price", self.grid.grid_conf["lower_price"])
 
-        while not self._stop:
-            try:
-                # Simulierter Marktpreis (Backtest-Modus)
-                if self.dry_run:
-                    start_price *= 1.001
+        # === WebSocket vorbereiten ===
+        channels = [{"symbol": self.symbol, "ch": "ticker"}]
 
-                # Grid aktualisieren
-                self.grid.update(start_price)
+        # Public WS starten (Preisfeed)
+        ws_public_task = asyncio.create_task(self.ws_public.start())
+        await asyncio.sleep(2)
+        await self.ws_public.subscribe(channels)
 
-                # Kurze Übersicht
-                self.grid.print_grid_status()
+        # Private WS starten (Orders, Positionen, Balances)
+        ws_private_task = asyncio.create_task(self.ws_private.start())
+        await asyncio.sleep(2)
+        await self.ws_private.subscribe([
+            {"ch": "order"},
+            {"ch": "position"},
+            {"ch": "balance"},
+        ])
 
-                await asyncio.sleep(self.update_interval)
+        try:
+            # === Hauptloop: Statusanzeige, Fehlerüberwachung und Recovery ===
+            while not self._stop:
+                state = self.grid.lifecycle.state
 
-            except KeyboardInterrupt:
-                self._stop = True
-                break
-            except Exception as e:
-                logger.error(f"Fehler im Grid-Loop: {e}", exc_info=True)
-                await asyncio.sleep(3)
+                # 🔴 Fehlerzustand → Retry prüfen
+                if state == GridState.ERROR:
+                    if self.grid.lifecycle.can_retry():
+                        logger.warning(f"[{self.symbol}] ⚠️  Fehler erkannt – starte Auto-Recovery ...")
+                        try:
+                            await self.ws_public.subscribe(channels)
+                            await self.ws_private.subscribe([
+                                {"ch": "order"},
+                                {"ch": "position"},
+                                {"ch": "balance"},
+                            ])
+                            self.grid.lifecycle.set_state(GridState.ACTIVE)
+                            logger.info(f"[{self.symbol}] ✅ Auto-Recovery erfolgreich.")
+                        except Exception as e:
+                            logger.error(f"[{self.symbol}] ❌ Auto-Recovery fehlgeschlagen: {e}")
+                            await asyncio.sleep(self.grid.lifecycle.retry_interval)
+                    else:
+                        await asyncio.sleep(5)
+                        continue
 
-        logger.info("🛑 Grid-Bot beendet.")
+                # 🟡 Pausiert → Warten
+                elif state == GridState.PAUSED:
+                    logger.warning(f"[{self.symbol}] ⏸️  Grid pausiert – warte auf Wiederaufnahme ...")
+                    await asyncio.sleep(5)
+                    continue
+
+                # 🟢 Aktiv → normaler Betrieb
+                elif state == GridState.ACTIVE:
+                    self.grid.print_grid_status()
+                    await asyncio.sleep(self.update_interval)
+
+                # 🔚 Geschlossen oder Init → kurz warten
+                elif state in (GridState.CLOSED, GridState.INIT):
+                    await asyncio.sleep(2)
+
+                elif state == GridState.ACTIVE:
+                    self.grid.print_grid_status()
+                    self.account_sync.sync()
+                    await asyncio.sleep(self.update_interval)
 
 
+        except asyncio.CancelledError:
+            logger.info("GridBot gestoppt (cancelled)")
+
+        except Exception as e:
+            logger.error(f"Fehler im GridBot: {e}")
+            self.grid.handle_error(e)
+
+        finally:
+            self._stop = True
+            self.grid.stop()
+            for task in [ws_public_task, ws_private_task]:
+                if not task.done():
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+            logger.info("✅ Bot sauber beendet.")
+
+# ============================================================
+# MAIN ENTRY
+# ============================================================
 async def main():
     parser = argparse.ArgumentParser(
         description="Bitunix GRID Trading Bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="Beispiel: python strategies/GRID/bot.py --config ONDOUSDT"
+        epilog="Beispiel: python strategies/GRID/bot.py --config ONDOUSDT",
     )
     parser.add_argument("--config", required=True, help="Coin Config (z. B. ONDOUSDT)")
     args = parser.parse_args()

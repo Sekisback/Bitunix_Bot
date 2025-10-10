@@ -9,7 +9,9 @@ from core.open_api_ws_sign import get_auth_ws_future
 from core.config import Config
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+
 
 class OpenApiWsFuturePrivate:
     def __init__(self, config: Config):
@@ -40,7 +42,7 @@ class OpenApiWsFuturePrivate:
                     logging.debug("Sent ping message")
                 await asyncio.sleep(self.heartbeat_interval)
             except websockets.exceptions.ConnectionClosedError:
-                logging.info("WebSocket connection closed by remote server")
+                logging.debug("WebSocket connection closed by remote server")
                 self.is_connected = False
                 break
             except Exception as e:
@@ -59,7 +61,7 @@ class OpenApiWsFuturePrivate:
                 "op": "login",
                 "args": [auth_data]
             }))
-            logging.info("WebSocket authentication successful")
+            logging.debug("WebSocket authentication successful")
         except Exception as e:
             logging.error(f"Authentication failed: {e}")
             raise
@@ -84,7 +86,7 @@ class OpenApiWsFuturePrivate:
                 "op": "subscribe",
                 "args": channels
             }))
-            logging.info("Private channel subscription successful")
+            logging.debug("Private channel subscription successful")
         except Exception as e:
             logging.error(f"Private subscription failed: {e}")
             raise
@@ -93,7 +95,7 @@ class OpenApiWsFuturePrivate:
         """Handle received messages"""
         try:
             data = json.loads(message)
-            logging.info(f"Received message: {data}")
+            logging.debug(f"Received message: {data}")
 
             # Handle heartbeat response
             if data.get('op') == 'ping':
@@ -218,7 +220,7 @@ class OpenApiWsFuturePrivate:
                 ) as websocket:
                     self.websocket = websocket
                     self.is_connected = True
-                    logging.info("WebSocket connection successful - private")
+                    logging.debug("WebSocket connection successful - private")
                     
                     # Authenticate with the server
                     await self._authenticate()
@@ -230,7 +232,7 @@ class OpenApiWsFuturePrivate:
                         async for message in websocket:
                             await self._handle_message(message)
                     except websockets.exceptions.ConnectionClosedError:
-                        logging.info("WebSocket connection closed by remote server, attempting to reconnect...")
+                        logging.debug("WebSocket connection closed by remote server, attempting to reconnect...")
                     except Exception as e:
                         logging.error(f"Error processing message: {e}")
                     finally:
@@ -245,7 +247,7 @@ class OpenApiWsFuturePrivate:
                     self.is_connected = False
                     await asyncio.sleep(self.reconnect_interval)
                     reconnect_attempts += 1
-                    logging.info(f"Attempting to reconnect... ({reconnect_attempts})")
+                    logging.debug(f"Attempting to reconnect... ({reconnect_attempts})")
                     
             except Exception as e:
                 logging.error(f"WebSocket connection failed: {e}")
@@ -262,7 +264,7 @@ class OpenApiWsFuturePrivate:
             # Start connection task
             await self.connect()
         except KeyboardInterrupt:
-            logging.info("Program interrupted by user")
+            logging.debug("Program interrupted by user")
         except Exception as e:
             logging.error(f"Program error: {e}")
         finally:
@@ -299,7 +301,7 @@ async def main():
     try:
         await client_task
     except KeyboardInterrupt:
-        logging.info("Program interrupted by user")
+        logging.debug("Program interrupted by user")
 
 if __name__ == "__main__":
     asyncio.run(main()) 

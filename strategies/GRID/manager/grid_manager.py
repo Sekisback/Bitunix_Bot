@@ -185,25 +185,40 @@ class GridManager:
     # -------------------------------------------------------------------------
     def update(self, current_price: float) -> None:
         """Zyklischer Update-Call pro Candle."""
-        if not self.lifecycle.is_active():
-            self.logger.debug("Grid pausiert – update() übersprungen.")
-            return
+        try:
+            if not self.lifecycle.is_active():
+                self.logger.debug("Grid pausiert – update() übersprungen.")
+                return
 
-        self._maybe_rebalance()
-        entry_on_touch = bool(self.strategy.get("entry_on_touch", True))
-        if not entry_on_touch:
-            return
+            # ---------------------------------------------------------
+            # TEST: künstlicher Fehler, um Auto-Recovery zu prüfen
+            # ---------------------------------------------------------
+            # import random
+            # if random.random() < 0.02:
+            #     raise RuntimeError("💥 Simulierter Testfehler im GridManager.update()")
 
-        allow_long = self.grid_direction in ("long", "both")
-        allow_short = self.grid_direction in ("short", "both")
+            # === Standard-Grid-Logik ===
+            self._maybe_rebalance()
+            entry_on_touch = bool(self.strategy.get("entry_on_touch", True))
+            if not entry_on_touch:
+                return
 
-        for lvl in self.levels:
-            if lvl.active or lvl.filled:
-                continue
-            if lvl.side == "BUY" and allow_long and current_price <= lvl.price:
-                self._place_entry(lvl)
-            elif lvl.side == "SELL" and allow_short and current_price >= lvl.price:
-                self._place_entry(lvl)
+            allow_long = self.grid_direction in ("long", "both")
+            allow_short = self.grid_direction in ("short", "both")
+
+            for lvl in self.levels:
+                if lvl.active or lvl.filled:
+                    continue
+                if lvl.side == "BUY" and allow_long and current_price <= lvl.price:
+                    self._place_entry(lvl)
+                elif lvl.side == "SELL" and allow_short and current_price >= lvl.price:
+                    self._place_entry(lvl)
+
+        except Exception as e:
+            self.logger.error(f"Callback error: {e}")
+            # 🧩 NEU: Fehler an Lifecycle weitergeben
+            self.lifecycle.set_state(GridState.ERROR, str(e))
+
 
     # -------------------------------------------------------------------------
     # TP / SL Berechnung
@@ -331,9 +346,7 @@ class GridManager:
         active = sum(1 for l in self.levels if l.active)
         filled = sum(1 for l in self.levels if l.filled)
 
-        self.logger.info(
-            f"📊 GRID STATUS {self.symbol}: total={total} | active={active} | filled={filled}"
-        )
+        self.logger.info(f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled}")
 
     # -------------------------------------------------------------------------
     # Info & Debug

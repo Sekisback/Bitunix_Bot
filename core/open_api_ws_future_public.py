@@ -8,7 +8,9 @@ from typing import Dict, Any, List, Callable, Optional
 from core.config import Config
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+#logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
+
 
 class OpenApiWsFuturePublic:
     def __init__(self, config: Config, on_message_callback: Optional[Callable] = None):
@@ -57,7 +59,7 @@ class OpenApiWsFuturePublic:
                     #logging.debug("Sent ping message")
                 await asyncio.sleep(self.heartbeat_interval)
             except websockets.exceptions.ConnectionClosedError:
-                logging.info("WebSocket connection closed by remote server")
+                logging.debug("WebSocket connection closed by remote server")
                 self.is_connected = False
                 break
             except Exception as e:
@@ -101,7 +103,7 @@ class OpenApiWsFuturePublic:
                 "op": "subscribe",
                 "args": channels
             }))
-            logging.info("Public channel subscription successful")
+            logging.debug("Public channel subscription successful")
         except Exception as e:
             logging.error(f"Public subscription failed: {e}")
             raise
@@ -111,14 +113,14 @@ class OpenApiWsFuturePublic:
         NEU: Re-Subscribe zu gespeicherten Channels nach Reconnect
         """
         if self.subscribed_channels:
-            logging.info("🔄 Re-Subscribe nach Reconnect...")
+            logging.debug("🔄 Re-Subscribe nach Reconnect...")
             await asyncio.sleep(1)  # Kurz warten nach Verbindung
             try:
                 await self.websocket.send(json.dumps({
                     "op": "subscribe",
                     "args": self.subscribed_channels
                 }))
-                logging.info(f"✅ Re-Subscribe erfolgreich: {[c.get('ch') for c in self.subscribed_channels]}")
+                logging.debug(f"✅ Re-Subscribe erfolgreich: {[c.get('ch') for c in self.subscribed_channels]}")
             except Exception as e:
                 logging.error(f"❌ Re-Subscribe fehlgeschlagen: {e}")
             
@@ -178,17 +180,17 @@ class OpenApiWsFuturePublic:
             if channel == 'trade':
                 # Handle real-time trade data
                 trade_data = message['data']
-                logging.info(f"Received trade data: {trade_data}")
+                logging.debug(f"Received trade data: {trade_data}")
                 
             elif channel == 'ticker':
                 # Handle 24-hour market data
                 ticker_data = message['data']
-                logging.info(f"Received 24h ticker: {ticker_data}")
+                logging.debug(f"Received 24h ticker: {ticker_data}")
                 
             elif channel == 'depth_book1':
                 # Handle order book depth data
                 depth_data = message['data']
-                logging.info(f"Received order book depth: {depth_data}")
+                logging.debug(f"Received order book depth: {depth_data}")
                 
             elif channel.startswith('market_kline_') or channel.startswith('mark_kline_'):
                 # Handle kline/candlestick data
@@ -230,7 +232,7 @@ class OpenApiWsFuturePublic:
                 ) as websocket:
                     self.websocket = websocket
                     self.is_connected = True
-                    logging.info("WebSocket connection successful - public")
+                    logging.debug("WebSocket connection successful - public")
                     
                     # Start heartbeat task
                     await self._start_ping()
@@ -243,7 +245,7 @@ class OpenApiWsFuturePublic:
                         async for message in websocket:
                             await self._handle_message(message)
                     except websockets.exceptions.ConnectionClosedError:
-                        logging.info("WebSocket connection closed by remote server, attempting to reconnect...")
+                        logging.debug("WebSocket connection closed by remote server, attempting to reconnect...")
                     except Exception as e:
                         logging.error(f"Error processing message: {e}")
                     finally:
@@ -258,7 +260,7 @@ class OpenApiWsFuturePublic:
                     self.is_connected = False
                     await asyncio.sleep(self.reconnect_interval)
                     reconnect_attempts += 1
-                    logging.info(f"Attempting to reconnect... ({reconnect_attempts})")
+                    logging.debug(f"Attempting to reconnect... ({reconnect_attempts})")
                     
             except Exception as e:
                 logging.error(f"WebSocket connection failed: {e}")
@@ -275,7 +277,7 @@ class OpenApiWsFuturePublic:
             # Start connection task
             await self.connect()
         except KeyboardInterrupt:
-            logging.info("Program interrupted by user")
+            logging.debug("Program interrupted by user")
         except Exception as e:
             logging.error(f"Program error: {e}")
         finally:
