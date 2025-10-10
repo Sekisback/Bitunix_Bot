@@ -79,10 +79,12 @@ class GridBot:
         self.api_config = Config()
 
         # === WebSocket-Clients ===
-        self.ws_public = OpenApiWsFuturePublic(
-            self.api_config, on_message_callback=self._on_public_ws
-        )
+        self.ws_public = OpenApiWsFuturePublic(self.api_config)
+        self.ws_public.on_message_callback = self._on_public_ws
+
         self.ws_private = OpenApiWsFuturePrivate(self.api_config)
+        self.ws_private.on_message_callback = self._on_private_ws
+
 
         # === Account-Information ===
         self.account_sync = AccountSync(client_pri, self.symbol)
@@ -101,6 +103,10 @@ class GridBot:
                 self._last_price = last_price
                 logger.info(f"💰 {self.symbol} @ {last_price:.4f}")
                 self.grid.update(last_price)
+    
+    async def _on_private_ws(self, channel, data):
+        """Callback für Private WebSocket (Order-, Position-, Balance-Events)."""
+        await self.account_sync.on_ws_event(channel, data)
 
     # ---------------------------------------------------------------------
     # Hauptloop mit Auto-Recovery
@@ -162,17 +168,12 @@ class GridBot:
                 # 🟢 Aktiv → normaler Betrieb
                 elif state == GridState.ACTIVE:
                     self.grid.print_grid_status()
+                    self.account_sync.sync(ws_enabled=True)
                     await asyncio.sleep(self.update_interval)
 
                 # 🔚 Geschlossen oder Init → kurz warten
                 elif state in (GridState.CLOSED, GridState.INIT):
                     await asyncio.sleep(2)
-
-                elif state == GridState.ACTIVE:
-                    self.grid.print_grid_status()
-                    self.account_sync.sync()
-                    await asyncio.sleep(self.update_interval)
-
 
         except asyncio.CancelledError:
             logger.info("GridBot gestoppt (cancelled)")

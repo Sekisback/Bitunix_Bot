@@ -115,72 +115,82 @@ class OpenApiWsFuturePrivate:
     async def _process_message(self, message: Dict[str, Any]):
         """Process messages in the message queue"""
         try:
+            logger = logging.getLogger("WS-PRIVATE")
+
             if message['ch'] == 'balance':
                 # Handle balance data
                 balance_data = message['data']
-                print("\n=== Balance Update ===")
-                print(f"Coin: {balance_data.get('coin', 'N/A')}")
-                print(f"Available Balance: {balance_data.get('available', 'N/A')}")
-                print(f"Frozen Amount: {balance_data.get('frozen', 'N/A')}")
-                print(f"Isolation Frozen: {balance_data.get('isolationFrozen', 'N/A')}")
-                print(f"Cross Frozen: {balance_data.get('crossFrozen', 'N/A')}")
-                print(f"Margin: {balance_data.get('margin', 'N/A')}")
-                print(f"Isolation Margin: {balance_data.get('isolationMargin', 'N/A')}")
-                print(f"Cross Margin: {balance_data.get('crossMargin', 'N/A')}")
-                print(f"Experience Money: {balance_data.get('expMoney', 'N/A')}")
-                print("-------------------")
+                logger.info("=" * 60)
+                logger.info("=== Balance Update ===")
+                logger.info("=" * 60)
+                logger.info(f"Coin             : {balance_data.get('coin', 'N/A')}")
+                logger.info(f"Available Balance: {balance_data.get('available', 'N/A')}")
+                logger.info(f"Frozen Amount    : {balance_data.get('frozen', 'N/A')}")
+                logger.info(f"Isolation Frozen : {balance_data.get('isolationFrozen', 'N/A')}")
+                logger.info(f"Cross Frozen     : {balance_data.get('crossFrozen', 'N/A')}")
+                logger.info(f"Margin           : {balance_data.get('margin', 'N/A')}")
+                logger.info(f"Isolation Margin : {balance_data.get('isolationMargin', 'N/A')}")
+                logger.info(f"Cross Margin     : {balance_data.get('crossMargin', 'N/A')}")
+                logger.info(f"Experience Money : {balance_data.get('expMoney', 'N/A')}")
+
                     
             elif message['ch'] == 'position':
                 # Handle position data
                 position_data = message['data']
-                print("\n=== Position Update ===")
-                print(f"Event: {position_data.get('event', 'N/A')}")
-                print(f"Position ID: {position_data.get('positionId', 'N/A')}")
-                print(f"Margin Mode: {position_data.get('marginMode', 'N/A')}")
-                print(f"Position Mode: {position_data.get('positionMode', 'N/A')}")
-                print(f"Side: {position_data.get('side', 'N/A')}")
-                print(f"Leverage: {position_data.get('leverage', 'N/A')}")
-                print(f"Margin: {position_data.get('margin', 'N/A')}")
-                print(f"Create Time: {position_data.get('ctime', 'N/A')}")
-                print(f"Quantity: {position_data.get('qty', 'N/A')}")
-                print(f"Entry Value: {position_data.get('entryValue', 'N/A')}")
-                print(f"Symbol: {position_data.get('symbol', 'N/A')}")
-                print(f"Realized PnL: {position_data.get('realizedPNL', 'N/A')}")
-                print(f"Unrealized PnL: {position_data.get('unrealizedPNL', 'N/A')}")
-                print(f"Funding: {position_data.get('funding', 'N/A')}")
-                print(f"Fee: {position_data.get('fee', 'N/A')}")
-                print("-------------------")
+                logger.info("=" * 60)
+                logger.info("=== Position Update ===")
+                logger.info("=" * 60)
+                logger.info(f"Event            : {position_data.get('event', 'N/A')}")
+                logger.info(f"Position ID      : {position_data.get('positionId', 'N/A')}")
+                logger.info(f"Margin Mode      : {position_data.get('marginMode', 'N/A')}")
+                logger.info(f"Position Mode    : {position_data.get('positionMode', 'N/A')}")
+                logger.info(f"Side             : {position_data.get('side', 'N/A')}")
+                logger.info(f"Leverage         : {position_data.get('leverage', 'N/A')}")
+                logger.info(f"Margin           : {position_data.get('margin', 'N/A')}")
+                logger.info(f"Create Time      : {position_data.get('ctime', 'N/A')}")
+                logger.info(f"Quantity         : {position_data.get('qty', 'N/A')}")
+                logger.info(f"Entry Value      : {position_data.get('entryValue', 'N/A')}")
+                logger.info(f"Symbol           : {position_data.get('symbol', 'N/A')}")
+                logger.info(f"Realized PnL     : {position_data.get('realizedPNL', 'N/A')}")
+                logger.info(f"Unrealized PnL   : {position_data.get('unrealizedPNL', 'N/A')}")
+                logger.info(f"Funding          : {position_data.get('funding', 'N/A')}")
+                logger.info(f"Fee              : {position_data.get('fee', 'N/A')}")
+
             
             elif message['ch'] == 'order':
                 # Handle order data
                 order_data = message['data']
-                print("\n=== Order Update ===")
-                print(f"Order ID: {order_data.get('orderId', 'N/A')}")
-                print(f"Symbol: {order_data.get('symbol', 'N/A')}")
-                print(f"Type: {order_data.get('type', 'N/A')}")
-                print(f"Status: {order_data.get('status', 'N/A')}")
-                print(f"Price: {order_data.get('price', 'N/A')}")
-                print(f"Quantity: {order_data.get('qty', 'N/A')}")
-                print("-------------------")
+                logger.info("=" * 60)
+                logger.info("=== Order Update ===")
+                logger.info("=" * 60)
+                logger.info(f"Order ID         : {order_data.get('orderId', 'N/A')}")
+                logger.info(f"Symbol           : {order_data.get('symbol', 'N/A')}")
+                logger.info(f"Type             : {order_data.get('type', 'N/A')}")
+                logger.info(f"Status           : {order_data.get('status', 'N/A')}")
+                logger.info(f"Price            : {order_data.get('price', 'N/A')}")
+                logger.info(f"Quantity         : {order_data.get('qty', 'N/A')}")
+
             
             elif message['ch'] == 'tpsl':
                 # Handle tpsl data
                 tpsl_data = message['data']
-                print("\n=== TPSL Update ===")
-                print(f"Symbol: {tpsl_data.get('symbol', 'N/A')}")
-                print(f"Order ID: {tpsl_data.get('orderId', 'N/A')}")
-                print(f"Position ID: {tpsl_data.get('positionId', 'N/A')}")
-                print(f"Leverage: {tpsl_data.get('leverage', 'N/A')}")
-                print(f"Side: {tpsl_data.get('side', 'N/A')}")
-                print(f"Position Mode: {tpsl_data.get('positionMode', 'N/A')}")
-                print(f"Status: {tpsl_data.get('status', 'N/A')}")
-                print(f"Type: {tpsl_data.get('type', 'N/A')}")
-                print(f"SL Quantity: {tpsl_data.get('slQty', 'N/A')}")
-                print(f"TP Order Type: {tpsl_data.get('tpOrderType', 'N/A')}")
-                print(f"SL Stop Type: {tpsl_data.get('slStopType', 'N/A')}")
-                print(f"SL Price: {tpsl_data.get('slPrice', 'N/A')}")
-                print(f"SL Order Price: {tpsl_data.get('slOrderPrice', 'N/A')}")
-                print("-------------------")
+                logger.info("=" * 60)
+                logger.info("=== TPSL Update ===")
+                logger.info("=" * 60)
+                logger.info(f"Symbol           : {tpsl_data.get('symbol', 'N/A')}")
+                logger.info(f"Order ID         : {tpsl_data.get('orderId', 'N/A')}")
+                logger.info(f"Position ID      : {tpsl_data.get('positionId', 'N/A')}")
+                logger.info(f"Leverage         : {tpsl_data.get('leverage', 'N/A')}")
+                logger.info(f"Side             : {tpsl_data.get('side', 'N/A')}")
+                logger.info(f"Position Mode    : {tpsl_data.get('positionMode', 'N/A')}")
+                logger.info(f"Status           : {tpsl_data.get('status', 'N/A')}")
+                logger.info(f"Type             : {tpsl_data.get('type', 'N/A')}")
+                logger.info(f"SL Quantity      : {tpsl_data.get('slQty', 'N/A')}")
+                logger.info(f"TP Order Type    : {tpsl_data.get('tpOrderType', 'N/A')}")
+                logger.info(f"SL Stop Type     : {tpsl_data.get('slStopType', 'N/A')}")
+                logger.info(f"SL Price         : {tpsl_data.get('slPrice', 'N/A')}")
+                logger.info(f"SL Order Price   : {tpsl_data.get('slOrderPrice', 'N/A')}")
+
                 
         except Exception as e:
             logging.error(f"Error processing message: {e}")
