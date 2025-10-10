@@ -104,39 +104,51 @@ class OrderSync:
                     self.logger.error("[OrderSync] ⚠️ Ungültige Ordergröße — Order übersprungen.")
                     continue
 
-                # trade_side dynamisch bestimmen
+                # === trade_side bestimmen ===
+                # Bei "both" werden Long- und Short-Grids gleichzeitig geöffnet → immer OPEN
                 if self.grid_direction == "both":
-                    trade_side = "OPEN" if lvl.side == "BUY" else "CLOSE"
+                    trade_side = "OPEN"
                 else:
                     trade_side = "OPEN"
 
-                # Sicherstellen, dass TP/SL existieren
-                tp_price = lvl.tp if lvl.tp is not None else 0
-                sl_price = lvl.sl if lvl.sl is not None else 0
+                # === TP/SL prüfen ===
+                tp_price = lvl.tp if lvl.tp else None
+                sl_price = lvl.sl if lvl.sl else None
 
-                # 💬 Logging mit vollständigen Details
-                self.logger.info(
-                    f"[OrderSync] 🟢 Setze echte Order @ {lvl.price} | side={lvl.side} | trade_side={trade_side} | "
-                    f"size={size} | TP={tp_price} | SL={sl_price}"
-                )
-
-                result = self.client.place_order(
+                # === Parameter-Objekt aufbauen ===
+                params = dict(
                     symbol=self.symbol,
                     side=lvl.side,
                     order_type="LIMIT",
                     qty=size,
                     price=lvl.price,
                     trade_side=trade_side,
-                    tp_price=tp_price,
-                    sl_price=sl_price,
                     tp_stop_type="MARK_PRICE",
                     sl_stop_type="MARK_PRICE",
                     client_id=client_id,
                 )
 
+                # Nur setzen, wenn Werte vorhanden sind (>0)
+                if tp_price:
+                    params["tp_price"] = tp_price
+                if sl_price:
+                    params["sl_price"] = sl_price
+
+                # 💬 Logging mit vollständigen Details
+                self.logger.info(
+                    f"[OrderSync] 🟢 Setze echte Order @ {lvl.price} | side={lvl.side} | "
+                    f"trade_side={trade_side} | size={size} | TP={tp_price} | SL={sl_price}"
+                )
+
+                # === Order senden ===
+                result = self.client.place_order(**params)
+
+                # === Ergebnis-Handling ===
                 lvl.order_id = result.get("orderId") if isinstance(result, dict) else str(result)
                 lvl.active = True
-                self.logger.info(f"[OrderSync] ✅ Order gesetzt ID={lvl.order_id} @ {lvl.price} (TP={tp_price}, SL={sl_price})")
+                self.logger.info(
+                    f"[OrderSync] ✅ Order gesetzt ID={lvl.order_id} @ {lvl.price} (TP={tp_price}, SL={sl_price})"
+                )
 
             except Exception as e:
                 self.logger.error(f"[OrderSync] Fehler beim Setzen @ {lvl.price}: {e}")
