@@ -144,3 +144,44 @@ class AccountSync:
             self.last_sync = time.time()
             self._update_balance_http()
         return self.balance
+
+        # -------------------------------------------------------------------------
+    # HTTP-Preload (Pending Orders)
+    # -------------------------------------------------------------------------
+    def preload_pending_orders(self):
+        """
+        Lädt alle offenen (Pending) Orders über die HTTP-API.
+        Wird beim Start einmalig aufgerufen, um den WS-Cache zu initialisieren.
+        """
+        try:
+            if not hasattr(self.client, "get_pending_orders"):
+                self.logger.warning(f"[{self.symbol}] ⚠️ Client unterstützt get_pending_orders() nicht.")
+                return
+
+            # Bitunix liefert direkt ein Dict mit 'orderList' und 'total'
+            res = self.client.get_pending_orders(symbol=self.symbol)
+
+            if not res:
+                self.logger.info(f"[{self.symbol}] Keine Pending Orders gefunden (leere Antwort).")
+                return
+
+            # 🧩 Korrekte Struktur: {"total": "...", "orderList": [ ... ]}
+            order_list = []
+            if isinstance(res, dict):
+                order_list = res.get("orderList", [])
+            elif isinstance(res, list):
+                order_list = res  # falls irgendwann direkt eine Liste zurückkommt
+
+            if not order_list:
+                self.logger.info(f"[{self.symbol}] Keine Pending Orders vorhanden.")
+                return
+
+            for o in order_list:
+                order_id = o.get("orderId") or o.get("id")
+                if not order_id:
+                    continue
+                self.orders[order_id] = o
+
+            self.logger.info(f"[{self.symbol}] 🔄 {len(order_list)} Pending Orders in Cache geladen.")
+        except Exception as e:
+            self.logger.error(f"[{self.symbol}] Fehler beim Laden der Pending Orders: {e}")

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 from datetime import datetime
 from .grid_lifecycle import GridLifecycle, GridState
+from .order_sync import OrderSync
 
 
 # =============================================================================
@@ -78,6 +79,13 @@ class GridManager:
             # Aktivieren
             self.lifecycle.set_state(GridState.ACTIVE)
             self.logger.info(f"[{self.symbol}] GridManager aktiv")
+
+            # === Order-Sync vorbereiten ===
+            self.order_sync = OrderSync(
+                symbol=self.symbol,
+                levels=self.levels,
+                logger=self.logger
+            )
         except Exception as e:
             self.lifecycle.set_state(GridState.ERROR, message=f"Init-Fehler: {e}")
             raise
@@ -256,8 +264,6 @@ class GridManager:
         else:
             return None
 
-
-
     # -------------------------------------------------------------------------
     # Order-Logik
     # -------------------------------------------------------------------------
@@ -362,3 +368,27 @@ class GridManager:
         self.logger.info(f"TP: {self.grid_conf.get('tp_mode')} | SL: {self.grid_conf.get('sl_mode')}")
         self.logger.info(f"Fees: include={self.risk_conf.get('include_fees', True)} side={self.risk_conf.get('fee_side', 'taker')}")
         self.logger.info(f"Rebalance Interval: {self.grid_conf.get('rebalance_interval', 300)}s")
+
+    # -------------------------------------------------------------------------
+    # Order-Sync / WS-Abgleich
+    # -------------------------------------------------------------------------
+    async def sync_orders(self, dry_run=True):
+        """
+        Führt einen Order-Sync durch.
+        dry_run=True -> Nur prüfen und loggen.
+        """
+        result = await self.order_sync.sync_orders(dry_run=dry_run)
+        self.logger.info(f"[{self.symbol}] OrderSync-Ergebnis: {result}")
+        return result
+    
+    # -------------------------------------------------------------------------
+    # AccountSync-Verknüpfung
+    # -------------------------------------------------------------------------
+    def attach_account_sync(self, account_sync):
+        """
+        Verknüpft den GridManager mit dem AccountSync, sodass OrderSync
+        offene Orders über den WS-Cache abrufen kann.
+        """
+        self.account_sync = account_sync
+        self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
+        self.logger.info(f"[{self.symbol}] OrderSync mit AccountSync verbunden.")

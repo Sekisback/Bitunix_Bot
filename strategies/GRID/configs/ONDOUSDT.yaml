@@ -20,8 +20,8 @@ trading:
 # 📊 GRID-PARAMETER
 # -----------------------------------------------------------------------------
 grid:
-  lower_price: 0.0           # Untere Preisgrenze des Grids (Coin-spezifisch)
-  upper_price: 0.0           # Obere Preisgrenze des Grids (Coin-spezifisch)
+  upper_price: 0.87          # Obere Preisgrenze des Grids (Coin-spezifisch)
+  lower_price: 0.85          # Untere Preisgrenze des Grids (Coin-spezifisch)
   grid_levels: 10            # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
   grid_mode: "arithmetic"    # "arithmetic" oder "geometric" (Preisverteilung)
   min_price_step: 0.0000001  # Minimales Tick-Intervall für Rundungen

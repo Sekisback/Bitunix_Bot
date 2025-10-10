@@ -392,6 +392,20 @@ class OpenApiHttpFuturePrivate:
         response = self.session.post(url, json=data, headers=headers)
         return self._handle_response(response)
 
+    # === PENDING ORDERN ===
+    def get_pending_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Get all pending (open) futures orders, sorted by creation time (desc).
+        GET /api/v1/futures/trade/get_pending_orders
+        Rate Limit: 10 req/sec/uid
+        """
+        url = f"{self.base_url}/api/v1/futures/trade/get_pending_orders"
+        params = {"symbol": symbol} if symbol else {}
+        query = sort_params(params)
+        headers = get_auth_headers(self.api_key, self.secret_key, query)
+        r = self.session.get(url, params=params, headers=headers)
+        return self._handle_response(r)
+
 
     def get_history_orders(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """Get historical orders"""

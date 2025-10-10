@@ -85,9 +85,16 @@ class GridBot:
         self.ws_private = OpenApiWsFuturePrivate(self.api_config)
         self.ws_private.on_message_callback = self._on_private_ws
 
-
         # === Account-Information ===
         self.account_sync = AccountSync(client_pri, self.symbol)
+        
+        # 🧩 Pending Orders einmalig laden (HTTP)
+        self.account_sync.preload_pending_orders()
+
+        # 🔗 OrderSync mit AccountSync verbinden
+        self.grid.attach_account_sync(self.account_sync)
+
+
     # ---------------------------------------------------------------------
     # WebSocket-Callbacks
     # ---------------------------------------------------------------------
@@ -204,6 +211,11 @@ async def main():
         epilog="Beispiel: python strategies/GRID/bot.py --config ONDOUSDT",
     )
     parser.add_argument("--config", required=True, help="Coin Config (z. B. ONDOUSDT)")
+    parser.add_argument(
+        "--sync",
+        action="store_true",
+        help="Führe OrderSync im Dry-Run-Modus aus (prüft Orders, keine Trades)"
+    )
     args = parser.parse_args()
 
     # === Config laden ===
@@ -224,6 +236,15 @@ async def main():
 
     # === Bot starten ===
     bot = GridBot(config, client_pri, client_pub)
+
+    # === Optionaler OrderSync-DryRun (Standalone) ===
+    if args.sync:
+        print("\n🔍 Starte OrderSync-DryRun...")
+        result = await bot.grid.sync_orders(dry_run=True)
+        print(f"✅ OrderSync abgeschlossen: {result}")
+        return
+    
+    # === Normaler Betrieb ===
     await bot.run()
 
 
