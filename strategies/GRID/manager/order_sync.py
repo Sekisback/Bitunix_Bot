@@ -1,76 +1,66 @@
+# file: strategies/GRID/manager/order_sync.py
+import time
 import logging
-from typing import Callable, List, Optional
-
 
 class OrderSync:
     """
-    Synchronisiert interne Grid-Level-Orders mit den offenen Orders (aus WS oder Cache).
-    Unterstützt einen 'dry_run'-Modus, der nur prüft, aber nichts ändert.
+    Synchronisiert erwartete Grid-Orders mit den echten Orders am Exchange.
+    Kann im Dry-Run oder Real-Mode laufen.
     """
 
-    def __init__(
-        self,
-        symbol: str,
-        levels,
-        logger: Optional[logging.Logger] = None,
-        fetch_orders_callback: Optional[Callable[[], List[dict]]] = None,
-    ):
-        """
-        :param symbol: Handels-Paar (z.B. 'ONDOUSDT')
-        :param levels: Liste von GridLevel-Objekten
-        :param logger: Optionaler Logger
-        :param fetch_orders_callback: Funktion, die offene Orders liefert (z.B. aus WS)
-        """
+    def __init__(self, symbol, levels, logger: logging.Logger, client=None, size: float = None, grid_direction: str = "both"):
         self.symbol = symbol
         self.levels = levels
-        self.logger = logger or logging.getLogger(f"OrderSync-{symbol}")
-        self.fetch_orders_callback = fetch_orders_callback
+        self.logger = logger
+        self.client = client
+        self.size = size or 0.0
+        self.grid_direction = grid_direction
+        self.fetch_orders_callback = None  # kann vom AccountSync überschrieben werden
 
-    # --------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     async def fetch_exchange_orders(self):
-        """Holt offene Orders über Callback oder liefert leere Liste."""
-        if not self.fetch_orders_callback:
-            self.logger.warning("[OrderSync] Kein fetch_orders_callback definiert – nutze leere Orderliste.")
-            return []
+        """Holt offene Orders – entweder über Callback (AccountSync) oder HTTP-Fallback."""
+        if self.fetch_orders_callback:
+            try:
+                return self.fetch_orders_callback()
+            except Exception as e:
+                self.logger.error(f"[OrderSync] Fehler bei fetch_orders_callback: {e}")
+                return []
+        return []  # Fallback: kein Cache verfügbar
 
-        try:
-            orders = self.fetch_orders_callback()  # synchrone Callback-Funktion
-            count = len(orders)
-            self.logger.debug(f"[OrderSync] {count} offene Orders aus Cache/WS empfangen.")
-            return orders
-        except Exception as e:
-            self.logger.error(f"[OrderSync] Fehler beim Abruf offener Orders: {e}")
-            return []
-
-    # --------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     def match_orders(self, exchange_orders):
-        """Vergleicht Exchange-Orders mit Grid-Leveln."""
+        """Vergleicht aktuelle Exchange-Orders mit erwarteten Grid-Levels."""
         matched, missing, obsolete = [], [], []
 
-        for level in self.levels:
-            match = next(
-                (o for o in exchange_orders if abs(float(o.get("price", 0)) - level.price) < 1e-8),
-                None,
-            )
-            if match:
-                matched.append(match)
-                level.status = "open"
-                level.order_id = match.get("orderId")
-            else:
-                missing.append(level)
+        # --- MISSING: Level ohne aktive Order ---
+        for lvl in self.levels:
+            if not lvl.active and not lvl.filled:
+                matched_order = next(
+                    (o for o in exchange_orders if abs(float(o.get("price", 0)) - lvl.price) < 1e-8),
+                    None,
+                )
+                if matched_order:
+                    lvl.order_id = matched_order.get("orderId")
+                    lvl.active = True
+                    matched.append(lvl)
+                else:
+                    missing.append(lvl)
 
+        # --- OBSOLETE: Exchange-Orders, die keinem Level mehr entsprechen ---
+        level_prices = [l.price for l in self.levels]
         for o in exchange_orders:
-            if not any(getattr(l, "order_id", None) == o.get("orderId") for l in self.levels):
+            if float(o.get("price", 0)) not in level_prices:
                 obsolete.append(o)
 
         return matched, missing, obsolete
 
-    # --------------------------------------------------------------------------
+    # ---------------------------------------------------------------------
     async def sync_orders(self, dry_run: bool = True):
         """
         Führt die Synchronisation durch.
-        - dry_run=True → Nur prüfen & loggen
-        - dry_run=False → Tatsächliches Nachsetzen/Löschen (nur wenn verfügbar)
+        - dry_run=True  → Nur prüfen & loggen
+        - dry_run=False → Tatsächliches Nachsetzen/Löschen
         """
         exchange_orders = await self.fetch_exchange_orders()
         matched, missing, obsolete = self.match_orders(exchange_orders)
@@ -79,6 +69,9 @@ class OrderSync:
             f"[OrderSync] MATCHED={len(matched)} | MISSING={len(missing)} | OBSOLETE={len(obsolete)}"
         )
 
+        # ---------------------------------------------------------------
+        # 🧪 Dry-Run
+        # ---------------------------------------------------------------
         if dry_run:
             self.logger.info("[OrderSync] Dry-Run aktiv — keine echten Änderungen durchgeführt.")
             for lvl in missing:
@@ -92,18 +85,70 @@ class OrderSync:
                 "mode": "dry_run",
             }
 
-        # === Real-Mode: hier würden create/cancel-Calls kommen ===
+        # ---------------------------------------------------------------
+        # ⚡ Real-Mode
+        # ---------------------------------------------------------------
         for lvl in missing:
             try:
-                await lvl.create_order()
-                self.logger.info(f"[OrderSync] Neue Order gesetzt @ {lvl.price}")
+                # Sicherheitsprüfung für Richtung
+                if self.grid_direction == "long" and lvl.side == "SELL":
+                    self.logger.warning(f"[OrderSync] ⚠️ Überspringe SELL-Level @ {lvl.price} (long-mode aktiv)")
+                    continue
+                if self.grid_direction == "short" and lvl.side == "BUY":
+                    self.logger.warning(f"[OrderSync] ⚠️ Überspringe BUY-Level @ {lvl.price} (short-mode aktiv)")
+                    continue
+
+                client_id = f"GRID_{lvl.index}_{int(time.time())}"
+                size = self.size or 0.0
+                if size <= 0.0:
+                    self.logger.error("[OrderSync] ⚠️ Ungültige Ordergröße — Order übersprungen.")
+                    continue
+
+                # trade_side dynamisch bestimmen
+                if self.grid_direction == "both":
+                    trade_side = "OPEN" if lvl.side == "BUY" else "CLOSE"
+                else:
+                    trade_side = "OPEN"
+
+                # Sicherstellen, dass TP/SL existieren
+                tp_price = lvl.tp if lvl.tp is not None else 0
+                sl_price = lvl.sl if lvl.sl is not None else 0
+
+                # 💬 Logging mit vollständigen Details
+                self.logger.info(
+                    f"[OrderSync] 🟢 Setze echte Order @ {lvl.price} | side={lvl.side} | trade_side={trade_side} | "
+                    f"size={size} | TP={tp_price} | SL={sl_price}"
+                )
+
+                result = self.client.place_order(
+                    symbol=self.symbol,
+                    side=lvl.side,
+                    order_type="LIMIT",
+                    qty=size,
+                    price=lvl.price,
+                    trade_side=trade_side,
+                    tp_price=tp_price,
+                    sl_price=sl_price,
+                    tp_stop_type="MARK_PRICE",
+                    sl_stop_type="MARK_PRICE",
+                    client_id=client_id,
+                )
+
+                lvl.order_id = result.get("orderId") if isinstance(result, dict) else str(result)
+                lvl.active = True
+                self.logger.info(f"[OrderSync] ✅ Order gesetzt ID={lvl.order_id} @ {lvl.price} (TP={tp_price}, SL={sl_price})")
+
             except Exception as e:
                 self.logger.error(f"[OrderSync] Fehler beim Setzen @ {lvl.price}: {e}")
 
+        # ---------------------------------------------------------------
+        # 🧹 Obsolete Orders aufräumen (optional)
+        # ---------------------------------------------------------------
         for o in obsolete:
             try:
-                # Hier wäre z.B. self.client.cancel_order()
-                self.logger.info(f"[OrderSync] Überflüssige Order gelöscht ID={o.get('orderId')}")
+                order_id = o.get("orderId")
+                self.logger.info(f"[OrderSync] 🗑️ Lösche veraltete Order ID={order_id}")
+                # Optional: self.client.cancel_order(symbol=self.symbol, orderId=order_id)
             except Exception as e:
                 self.logger.error(f"[OrderSync] Fehler beim Löschen ID={o.get('orderId')}: {e}")
 

@@ -63,10 +63,10 @@ grid:
 # 💸 RISIKOKONFIGURATION UND GEBÜHREN
 # -----------------------------------------------------------------------------
 risk:
-  include_fees: true         # true = Ordergröße berücksichtigt Gebühren
-  fee_side: "taker"          # "maker" oder "taker"
-  maker_fee_pct: 0.0002      # Gebührensatz für Maker-Orders
-  taker_fee_pct: 0.0006      # Gebührensatz für Taker-Orders
+  include_fees: false        # true = Ordergröße berücksichtigt Gebühren
+  fee_side: "maker"          # "maker" oder "taker"
+  maker_fee_pct: 0.00014     # Gebührensatz für Maker-Orders
+  taker_fee_pct: 0.00014     # Gebührensatz für Taker-Orders
 
 # -----------------------------------------------------------------------------
 # 💰 MARGIN- UND HEBELKONFIGURATION

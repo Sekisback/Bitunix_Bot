@@ -7,6 +7,7 @@ Kompatibel mit GridManager v2 und neuer YAML-Struktur
 import argparse
 import asyncio
 import logging
+import time
 import os
 import sys
 from pathlib import Path
@@ -87,7 +88,7 @@ class GridBot:
 
         # === Account-Information ===
         self.account_sync = AccountSync(client_pri, self.symbol)
-        
+
         # 🧩 Pending Orders einmalig laden (HTTP)
         self.account_sync.preload_pending_orders()
 
@@ -146,6 +147,15 @@ class GridBot:
             while not self._stop:
                 state = self.grid.lifecycle.state
 
+                # 🧩 Automatischer OrderSync-Check alle 10 Minuten
+                if not hasattr(self, "_last_sync_check"):
+                    self._last_sync_check = 0
+
+                now = time.time()
+                if now - self._last_sync_check >= 60:  # 600 Sekunden = 10 Minuten
+                    self._last_sync_check = now
+                    asyncio.create_task(self._auto_sync_check())
+
                 # 🔴 Fehlerzustand → Retry prüfen
                 if state == GridState.ERROR:
                     if self.grid.lifecycle.can_retry():
@@ -201,6 +211,23 @@ class GridBot:
                         pass
             logger.info("✅ Bot sauber beendet.")
 
+    # ---------------------------------------------------------------------
+    # Automatischer OrderSync-DryRun (Hintergrund)
+    # ---------------------------------------------------------------------
+    async def _auto_sync_check(self):
+        """
+        Führt periodisch einen Dry-Run-OrderSync durch,
+        um Abweichungen zwischen Grid-Levels und offenen Orders zu erkennen.
+        """
+        try:
+            result = await self.grid.sync_orders()
+            logger.info(
+                f"[{self.symbol}] 🔍 Auto-OrderSync: "
+                f"MATCHED={result['matched']} | MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
+            )
+        except Exception as e:
+            logger.error(f"[{self.symbol}] Fehler beim Auto-OrderSync: {e}")
+
 # ============================================================
 # MAIN ENTRY
 # ============================================================
@@ -240,7 +267,7 @@ async def main():
     # === Optionaler OrderSync-DryRun (Standalone) ===
     if args.sync:
         print("\n🔍 Starte OrderSync-DryRun...")
-        result = await bot.grid.sync_orders(dry_run=True)
+        result = await bot.grid.sync_orders()
         print(f"✅ OrderSync abgeschlossen: {result}")
         return
     

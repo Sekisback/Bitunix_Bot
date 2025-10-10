@@ -68,6 +68,12 @@ class GridManager:
         # === Lifecycle ===
         self.lifecycle = GridLifecycle(self.symbol, on_state_change=self._on_state_change)
 
+
+        # Debug-Ausgabe für Dry-Run prüfen
+        raw_dry = self.trading.get("dry_run", None)
+        self.logger.info(f"[{self.symbol}] ⚙️ Trading-Block geladen: {self.trading}")
+        self.logger.info(f"[{self.symbol}] ⚙️ Dry-Run Wert: {raw_dry!r} (Typ: {type(raw_dry).__name__})")
+
         try:
             # Initialer Aufbau
             self.validate_config()
@@ -81,11 +87,21 @@ class GridManager:
             self.logger.info(f"[{self.symbol}] GridManager aktiv")
 
             # === Order-Sync vorbereiten ===
+            # TP/SL vorher berechnen und in die Level schreiben
+            for lvl in self.levels:
+                lvl.tp = self._take_profit_for(lvl.price, lvl.index, lvl.side)
+                lvl.sl = self._stop_loss_for(lvl.price, lvl.side)
+
+
             self.order_sync = OrderSync(
                 symbol=self.symbol,
                 levels=self.levels,
-                logger=self.logger
+                logger=self.logger,
+                client=self.client,
+                size=self._effective_order_size(),
+                grid_direction=self.grid_direction,
             )
+
         except Exception as e:
             self.lifecycle.set_state(GridState.ERROR, message=f"Init-Fehler: {e}")
             raise
@@ -143,12 +159,24 @@ class GridManager:
     # GridLevel erzeugen
     # -------------------------------------------------------------------------
     def _create_grid_levels(self) -> None:
-        mid = (self.grid_conf["lower_price"] + self.grid_conf["upper_price"]) / 2.0
-        self.levels = [
-            GridLevel(index=i, price=p, side=("BUY" if p <= mid else "SELL"))
-            for i, p in enumerate(self._price_list)
-        ]
-        self.logger.info(f"{len(self.levels)} GridLevel-Objekte erstellt.")
+        lower = self.grid_conf["lower_price"]
+        upper = self.grid_conf["upper_price"]
+        mid = (lower + upper) / 2.0
+
+        self.levels = []
+
+        for i, p in enumerate(self._price_list):
+            if self.grid_direction == "long":
+                side = "BUY"
+            elif self.grid_direction == "short":
+                side = "SELL"
+            else:  # both
+                side = "BUY" if p <= mid else "SELL"
+
+            self.levels.append(GridLevel(index=i, price=p, side=side))
+
+        self.logger.info(f"{len(self.levels)} GridLevel-Objekte erstellt ({self.grid_direction}).")
+
 
     # -------------------------------------------------------------------------
     # Helpers
@@ -158,6 +186,11 @@ class GridManager:
         return round(round(price / tick) * tick, 12)
 
     def _effective_order_size(self) -> float:
+        """
+        Berechnet die effektive Ordergröße unter Berücksichtigung der Gebühren.
+        Wenn include_fees=True, wird automatisch die doppelte Gebühr (Entry + Exit)
+        einbezogen, um den real verfügbaren Netto-Tradebetrag sicherzustellen.
+        """
         base_size = float(self.grid_conf.get("base_order_size", 0.0))
         if base_size <= 0.0:
             self.logger.error("base_order_size <= 0 – keine Order möglich.")
@@ -167,10 +200,17 @@ class GridManager:
             fee_side = self.risk_conf.get("fee_side", "taker").lower()
             fee_pct = float(
                 self.risk_conf.get(
-                    "maker_fee_pct" if fee_side == "maker" else "taker_fee_pct", 0.0006
+                    "maker_fee_pct" if fee_side == "maker" else "taker_fee_pct",
+                    0.0006,
                 )
             )
-            size = base_size * (1.0 - fee_pct)
+            # doppelte Gebühr (Entry + Exit)
+            effective_fee = fee_pct * 2.0
+            size = base_size * (1.0 - effective_fee)
+            self.logger.debug(
+                f"[FeeCalc] base={base_size} fee_side={fee_side} fee_pct={fee_pct} "
+                f"x2={effective_fee:.6f} → effective_size={size:.8f}"
+            )
         else:
             size = base_size
 
@@ -231,38 +271,69 @@ class GridManager:
     # -------------------------------------------------------------------------
     # TP / SL Berechnung
     # -------------------------------------------------------------------------
-    def _take_profit_for(self, entry_price: float, level_index: int) -> Optional[float]:
+    def _take_profit_for(self, entry_price: float, level_index: int, side: str = "BUY") -> Optional[float]:
         """
-        Berechnet den Take-Profit für ein bestimmtes Level.
+        Berechnet den Take-Profit für ein Entry-Level abhängig von der Order-Richtung.
+        - BUY → TP oberhalb des Entry-Preises (nächstes Grid-Level oder Prozent)
+        - SELL → TP unterhalb des Entry-Preises (vorheriges Grid-Level oder Prozent)
         """
         mode = self.grid_conf.get("tp_mode", "percent")
-        if mode == "next_grid":
-            # nächstes Level als Ziel
-            if level_index < len(self._price_list) - 1:
-                return self._round_to_tick(self._price_list[level_index + 1])
-            # falls oberstes Level → kleiner Aufschlag
-            return self._round_to_tick(entry_price * 1.01)
-        elif mode == "percent":
-            pct = float(self.grid_conf.get("take_profit_pct", 0.003))
-            return self._round_to_tick(entry_price * (1.0 + pct))
-        else:
-            return None  # kein TP
 
-    def _stop_loss_for(self, entry_price: float) -> Optional[float]:
+        # === LONG / BUY ===
+        if side.upper() == "BUY":
+            if mode == "next_grid":
+                # Nächstes Preislevel oder extrapolierter Grid-Schritt
+                if level_index < len(self._price_list) - 1:
+                    tp = self._price_list[level_index + 1]
+                else:
+                    step = self._price_list[-1] - self._price_list[-2]
+                    tp = entry_price + step
+            elif mode == "percent":
+                pct = float(self.grid_conf.get("take_profit_pct", 0.003))
+                tp = entry_price * (1.0 + pct)
+            else:
+                return None
+
+        # === SHORT / SELL ===
+        else:
+            if mode == "next_grid":
+                # Vorheriges Preislevel oder extrapolierter Grid-Schritt
+                if level_index > 0:
+                    tp = self._price_list[level_index - 1]
+                else:
+                    step = self._price_list[1] - self._price_list[0]
+                    tp = entry_price - step
+            elif mode == "percent":
+                pct = float(self.grid_conf.get("take_profit_pct", 0.003))
+                tp = entry_price * (1.0 - pct)
+            else:
+                return None
+
+        return self._round_to_tick(tp)
+
+
+    def _stop_loss_for(self, entry_price: float, side: str = "BUY") -> Optional[float]:
         """
-        Berechnet den Stop-Loss für ein Entry-Level.
+        Berechnet den Stop-Loss abhängig von Entry-Richtung.
+        - BUY → SL unterhalb des Entry-Preises
+        - SELL → SL oberhalb des Entry-Preises
         """
         mode = self.grid_conf.get("sl_mode", "percent")
         if mode == "none":
             return None
+
         elif mode == "fixed":
             fixed = self.grid_conf.get("stop_loss_price")
             return self._round_to_tick(float(fixed)) if fixed is not None else None
+
         elif mode == "percent":
             pct = float(self.grid_conf.get("stop_loss_pct", 0.01))
-            return self._round_to_tick(entry_price * (1.0 - pct))
+            sl = entry_price * (1.0 - pct) if side.upper() == "BUY" else entry_price * (1.0 + pct)
+            return self._round_to_tick(sl)
+
         else:
             return None
+
 
     # -------------------------------------------------------------------------
     # Order-Logik
@@ -372,14 +443,27 @@ class GridManager:
     # -------------------------------------------------------------------------
     # Order-Sync / WS-Abgleich
     # -------------------------------------------------------------------------
-    async def sync_orders(self, dry_run=True):
+    async def sync_orders(self, dry_run=None):
         """
         Führt einen Order-Sync durch.
         dry_run=True -> Nur prüfen und loggen.
+        dry_run=False -> Reale Order-Aktionen.
         """
+        # Wenn kein Wert übergeben wird, nimm den aus der Trading-Config
+        if dry_run is None:
+            raw = self.trading.get("dry_run", True)
+            # Robust casten (egal ob bool oder string)
+            dry_run = str(raw).lower() in ("true", "1", "yes")
+
+        self.logger.info(
+            f"[{self.symbol}] Starte OrderSync — Modus: {'Dry-Run' if dry_run else 'Real'} "
+            f"(raw={self.trading.get('dry_run')!r})"
+        )
+
         result = await self.order_sync.sync_orders(dry_run=dry_run)
         self.logger.info(f"[{self.symbol}] OrderSync-Ergebnis: {result}")
         return result
+
     
     # -------------------------------------------------------------------------
     # AccountSync-Verknüpfung
