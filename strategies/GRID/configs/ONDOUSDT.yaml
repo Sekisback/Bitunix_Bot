@@ -1,85 +1,62 @@
-# ==============================================================
-# ⚙️ GRID CONFIG – ONDO/USDT
-# --------------------------------------------------------------
-# Coin-spezifische Konfiguration für die Grid-Strategie.
-# Diese Datei überschreibt bestimmte Werte aus der base.yaml.
-# ==============================================================
+# =============================================================================
+# BASE CONFIG – Standardparameter für den Bitunix GRID Bot
+# =============================================================================
+# Diese Datei dient als Grundlage für alle Coin-spezifischen YAMLs.
+# Coin-Configs erben automatisch alle Werte aus dieser Base-Datei
+# und überschreiben nur die relevanten Felder (z.B. Preise, Ordergrößen).
+# =============================================================================
 
-symbol: "ONDOUSDT"  # Handelspaar
+symbol: "ONDOUSDT"       # Platzhalter, wird in Coin-Config überschrieben
 
-# ==============================================================
-# ⚙️ TRADING – Grundlegende Handelseinstellungen
-# ==============================================================
+# -----------------------------------------------------------------------------
+# ⚙️ TRADING-GRUNDEINSTELLUNGEN
+# -----------------------------------------------------------------------------
 trading:
-  interval: "1m"             # Candle-Intervall (1m, 5m, 15m, ...)
-  leverage: 3                # Standardhebel für Futures-Positionen
-  dry_run: true              # true = Simulation (keine echten Orders)
-  client_id_prefix: "GRID"   # Präfix für Order-IDs (z. B. GRID-BTC)
-  max_positions: 10          # Maximal gleichzeitig aktive Orders
-  grid_direction: "long"     # Handelsrichtung: "long" | "short" | "both"
+  dry_run: true              # true = Simulation ohne echte Orders
+  grid_direction: "both"     # "long", "short" oder "both" – Handelsrichtung
+  client_id_prefix: "GRID"   # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
 
-# ==============================================================
-# 💰 MARGIN / RISK MANAGEMENT (GLOBAL)
-# --------------------------------------------------------------
-# Dieser Abschnitt definiert allgemeine Margin- und Risiko-Settings,
-# die für alle Strategien gelten können. 
-# ==============================================================
-margin:
-  mode: "isolated"           # "isolated" = Risiko je Order begrenzt
-                             # "cross" = gemeinsames Konto-Margin
-  leverage: 3                # Separater Hebel (falls abweichend)
-  auto_reduce_only: false    # true = nur schließen, kein neuer Entry
-
-risk:
-  # ------------------------------
-  # ⚖️ Allgemeine Risikowerte (globale Defaults)
-  # ------------------------------
-  include_fees: true          # true = Gebühren in Ordergröße einkalkulieren
-  fee_side: "taker"           # Welche Gebühr gilt für den Bot (maker/taker)
-
-  # === Fallback-TP/SL (nur aktiv, wenn Strategie keine eigenen Werte definiert) ===
-  tp_pct: 0.02                # Standard-TP (2.0 %) – nur bei Strategien ohne tp_mode
-  sl_pct: 0.01                # Standard-SL (1.0 %) – nur bei Strategien ohne sl_mode
-
-  trailing_stop: false        # Dynamischer Stop-Loss aktivieren?
-  trailing_distance_pct: 0.002  # Distanz (0.2 %) bei aktivem Trailing Stop
-
-# ==============================================================
-# 📈 GRID CONFIG – Strategie-spezifische Grid-Einstellungen
-# --------------------------------------------------------------
-# Dieser Abschnitt steuert ausschließlich die Grid-Handelslogik.
-# Alle Werte hier überschreiben die globalen risk-Einstellungen.
-# ==============================================================
+# -----------------------------------------------------------------------------
+# 📊 GRID-PARAMETER
+# -----------------------------------------------------------------------------
 grid:
-  # ------------------------------
-  # 🧱 Struktur des Grids
-  # ------------------------------
-  grid_mode: "arithmetic"    # "arithmetic" = gleiche Preisabstände
-                             # "geometric" = prozentuale Abstände
-  grid_levels: 20            # Anzahl der Grid-Linien (Buy/Sell-Levels)
-  base_order_size: 0.001     # Standardgröße je Order (in Coin)  
-  upper_price: 0.95          # Obere Preisgrenze (je Coin angeben)
-  lower_price: 0.85          # Untere Preisgrenze (je Coin angeben)
-  min_price_step: 0.001      # Kleinster erlaubter Preisabstand (USDT)
+  lower_price: 0.0           # Untere Preisgrenze des Grids (Coin-spezifisch)
+  upper_price: 0.0           # Obere Preisgrenze des Grids (Coin-spezifisch)
+  grid_levels: 10            # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
+  grid_mode: "arithmetic"    # "arithmetic" oder "geometric" (Preisverteilung)
+  min_price_step: 0.0000001  # Minimales Tick-Intervall für Rundungen
 
-  # ------------------------------
-  # 🏁 TAKE-PROFIT (TP)
-  # ------------------------------
-  tp_mode: "next_grid"       # "percent" = fester Prozentwert
-                             # "next_grid" = nächstes Grid-Level als TP
+  base_order_size: 20        # Grund-Ordergröße (Coin-spezifisch)
+  active_rebuy: true         # Nach Fill erneut Order am selben Level platzieren
 
-  # ------------------------------
-  # 🛑 STOP-LOSS (SL)
-  # ------------------------------
-  sl_mode: "fixed"           # "percent" = prozentual
-                             # "fixed" = fixer Preis
-                             # "none" = kein SL aktiv
-  stop_loss_pct: 0.01        # Nur relevant, wenn sl_mode = "percent"
-  stop_loss_price: 0.80      # Nur relevant, wenn sl_mode = "fixed", sonst null
+  tp_mode: "percent"         # "percent" oder "next_grid"
+  take_profit_pct: 0.003     # Nur aktiv, wenn tp_mode = "percent"
 
-# ==============================================================
-# 🧠 STRATEGY / SYSTEM / LOGGING
-# ==============================================================
-system:
-  debug: true                # true = erweiterte Debug-Ausgaben aktivieren
+  sl_mode: "percent"         # "percent", "fixed" oder "none"
+  stop_loss_pct: 0.01        # Nur aktiv, wenn sl_mode = "percent"
+  stop_loss_price: 1.2       # Nur bei sl_mode = "fixed" aktiv
 
+  rebalance_interval: 300    # Sekunden zwischen automatischem Rebalancing
+
+# -----------------------------------------------------------------------------
+# 💸 RISIKOKONFIGURATION UND GEBÜHREN
+# -----------------------------------------------------------------------------
+risk:
+  include_fees: true         # true = Ordergröße berücksichtigt Gebühren
+  fee_side: "taker"          # "maker" oder "taker"
+  maker_fee_pct: 0.0002      # Gebührensatz für Maker-Orders
+  taker_fee_pct: 0.0006      # Gebührensatz für Taker-Orders
+
+# -----------------------------------------------------------------------------
+# 💰 MARGIN- UND HEBELKONFIGURATION
+# -----------------------------------------------------------------------------
+margin:
+  mode: "isolated"           # "isolated" oder "cross"
+  leverage: 3                # Hebel für diese Strategie
+  auto_reduce_only: false    # true = keine neuen Positionen, nur Reduktion
+
+# -----------------------------------------------------------------------------
+# 🧩 STRATEGIEVERHALTEN
+# -----------------------------------------------------------------------------
+strategy:
+  entry_on_touch: true       # true = Order beim Preis-Touch platzieren

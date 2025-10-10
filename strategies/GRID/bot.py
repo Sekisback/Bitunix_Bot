@@ -46,7 +46,16 @@ class GridBot:
 
         # API / Mock
         if self.dry_run:
-            from strategies.GRID.test_grid_manager import MockExchange
+            class MockExchange:
+                """Minimaler Fake-Client zum Testen ohne API-Zugriff."""
+                def place_order(self, **kwargs):
+                    print(f"[MOCK] Order: {kwargs}")
+                    return f"MOCK-{int(time.time())}"
+
+                def cancel_all(self, symbol: str):
+                    print(f"[MOCK] Cancel all orders for {symbol}")
+                    return True
+
             self.exchange = MockExchange()
         else:
             self.exchange = client_pri
