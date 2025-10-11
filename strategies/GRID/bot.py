@@ -55,6 +55,7 @@ class GridBot:
 
         self.exchange = client_pri if not self.dry_run else client_pub
         self.grid = GridManager(self.exchange, config)
+
         self.api_config = Config()
 
         self.ws_public = OpenApiWsFuturePublic(self.api_config)
@@ -221,6 +222,11 @@ async def main():
     except GridInitializationError as e:
         logger.error(f"❌ Grid-Init fehlgeschlagen: {e}")
         sys.exit(1)
+
+    try:
+        bot.grid.setup_margin()
+    except Exception as e:
+        logger.warning(f"[{config.symbol}] ⚠️ Margin-Setup fehlgeschlagen: {e}")
 
     if args.sync:
         print("\n🔍 OrderSync-DryRun...")

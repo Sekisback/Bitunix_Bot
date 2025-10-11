@@ -4,8 +4,7 @@ import time
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from typing import List, Optional, Dict
-from datetime import datetime
+from typing import List, Optional
 from .grid_lifecycle import GridLifecycle, GridState
 from .order_sync import OrderSync
 import sys
@@ -13,10 +12,11 @@ from pathlib import Path
 
 GRID_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(GRID_DIR))
+
 from models.config_models import GridMode, TPMode, SLMode
 from utils.exceptions import (
     InvalidGridConfigError, OrderPlacementError,
-    PriceOutOfRangeError, GridInitializationError
+    GridInitializationError
 )
 
 @dataclass
@@ -52,6 +52,8 @@ class GridManager:
         self.last_rebalance: float = 0.0
         self._levels_lock = asyncio.Lock()
         self._grid_config_hash: Optional[str] = None
+        self.margin_mode = config.margin.mode
+        self.leverage = config.margin.leverage
 
         self.logger = logging.getLogger("GridManager")
         level_name = self.system.log_level.upper()
@@ -59,8 +61,9 @@ class GridManager:
         self.lifecycle = GridLifecycle(self.symbol, on_state_change=self._on_state_change)
 
         raw_dry = self.trading.dry_run
-        self.logger.info(f"[{self.symbol}] ⚙️ Trading-Block geladen")
+        self.logger.info(f"[{self.symbol}] ⚙️  Trading-Block geladen")
         self.logger.debug(f"[{self.symbol}] Dry-Run: {raw_dry!r}")
+
 
         try:
             self.validate_config()
@@ -68,6 +71,7 @@ class GridManager:
             self._create_grid_levels()
             self.last_rebalance = time.time()
             self.log_summary()
+
             self.lifecycle.set_state(GridState.ACTIVE)
             self.logger.info(f"[{self.symbol}] GridManager aktiv")
 
@@ -80,6 +84,7 @@ class GridManager:
                 client=self.client, size=self._effective_order_size(),
                 grid_direction=self.grid_direction,
             )
+
         except (InvalidGridConfigError, GridInitializationError) as e:
             self.lifecycle.set_state(GridState.ERROR, message=str(e))
             raise
@@ -310,13 +315,17 @@ class GridManager:
 
     def log_summary(self) -> None:
         self.logger.info("=" * 60)
-        self.logger.info(f"GRID SUMMARY ({self.symbol})")
+        self.logger.info(f"GRID SUMMARY ({self.symbol}) {'=== DRY-RUN ===' if self.trading.dry_run else '=== REAL MODE ==='}")
         self.logger.info("=" * 60)
-        self.logger.info(f"Direction: {self.grid_direction}")
-        self.logger.info(f"Mode: {self.grid_conf.grid_mode.value}")
-        self.logger.info(f"Levels: {len(self.levels)} ({self.grid_conf.lower_price} → {self.grid_conf.upper_price})")
-        self.logger.info(f"Base Size: {self.grid_conf.base_order_size}")
-        self.logger.info(f"TP: {self.grid_conf.tp_mode.value} | SL: {self.grid_conf.sl_mode.value}")
+        self.logger.info(f"Direction  : {self.grid_direction.upper()}")
+        self.logger.info(f"Margin Mode: {self.margin_mode.upper()}")
+        self.logger.info(f"Leverage   : {self.leverage}")
+        self.logger.info(f"Mode       : {self.grid_conf.grid_mode.value}")
+        self.logger.info(f"Levels     : {len(self.levels)} ({self.grid_conf.lower_price} → {self.grid_conf.upper_price})")
+        self.logger.info(f"Base Size  : {self.grid_conf.base_order_size}")
+        self.logger.info(f"Take Profit: {self.grid_conf.tp_mode.value}")
+        self.logger.info(f"Stop Loss  : {self.grid_conf.sl_mode.value}")
+        self.logger.info("=" * 60)
 
     async def sync_orders(self, dry_run=None):
         if dry_run is None:
@@ -331,3 +340,7 @@ class GridManager:
         self.account_sync = account_sync
         self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
         self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
+
+    def setup_margin(self):
+        self.client.change_margin_mode(symbol=self.symbol, margin_mode=self.margin_mode.upper())
+        self.client.change_leverage(symbol=self.symbol, leverage=self.leverage)

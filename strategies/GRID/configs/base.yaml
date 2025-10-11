@@ -72,7 +72,7 @@ risk:
 # 💰 MARGIN- UND HEBELKONFIGURATION
 # -----------------------------------------------------------------------------
 margin:
-  mode: "isolated"           # "isolated" oder "cross"
+  mode: "ISOLATION"          # "ISOLATION" oder "CROSS"
   leverage: 3                # Hebel für diese Strategie
   auto_reduce_only: false    # true = keine neuen Positionen, nur Reduktion
 

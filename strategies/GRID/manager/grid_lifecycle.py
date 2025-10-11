@@ -33,8 +33,8 @@ class GridLifecycle:
     last_error_time: Optional[datetime] = field(default=None, init=False)
     retry_interval: int = field(default=30, init=False)  # Sekunden bis Retry erlaubt
 
-    def __post_init__(self):
-        self.logger.info(f"[{self.symbol}] GridLifecycle initialisiert -> Zustand: {self.state.value}")
+    #def __post_init__(self):
+        #self.logger.info(f"[{self.symbol}] GridLifecycle initialisiert -> Zustand: {self.state.value}")
 
     def set_state(self, new_state: GridState, message: Optional[str] = None) -> None:
         if new_state not in ALLOWED_TRANSITIONS[self.state]:
@@ -56,8 +56,8 @@ class GridLifecycle:
             self.logger.warning(f"[{self.symbol}] {old.value} → PAUSED: {message or ''}")
         elif new_state is GridState.CLOSED:
             self.logger.info(f"[{self.symbol}] {old.value} → CLOSED")
-        else:
-            self.logger.info(f"[{self.symbol}] {old.value} → {new_state.value}")
+        # else:
+        #     self.logger.info(f"[{self.symbol}] {old.value} → {new_state.value}")
 
         # Callback
         if self.on_state_change:

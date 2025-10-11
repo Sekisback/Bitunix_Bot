@@ -95,7 +95,7 @@ class RiskConfig(BaseModel):
 
 
 class MarginConfig(BaseModel):
-    mode: Literal["isolated", "cross"] = "isolated"
+    mode: Literal["CROSS", "ISOLATION"] = "ISOLATION"
     leverage: int = Field(default=3, ge=1, le=125)
     auto_reduce_only: bool = False
 
