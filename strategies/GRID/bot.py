@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-GRID Trading Bot – aktualisierte Version
-Kompatibel mit GridManager v2 und neuer YAML-Struktur
+GRID Trading Bot – Pydantic-kompatible Version
 """
 
 import argparse
@@ -29,8 +28,6 @@ from core.open_api_ws_future_private import OpenApiWsFuturePrivate
 # === Strategie-Komponenten ===
 from manager.grid_manager import GridManager
 from manager.grid_lifecycle import GridState
-
-# === Account- Informationen ===
 from manager.account_sync import AccountSync
 
 from utils.config_loader import load_config
@@ -41,7 +38,6 @@ from utils.logging_setup import setup_logging
 # Logging-Tuning – Core-Module leiser, Bot sichtbar
 # ============================================================
 
-# Core-Module und Async-Libraries leise schalten
 for name in [
     "core.open_api_ws_future_public",
     "core.open_api_ws_future_private",
@@ -63,13 +59,23 @@ logger.setLevel(logging.INFO)
 class GridBot:
     """GRID Bot Wrapper für Bitunix mit Websocket-Integration"""
 
-    def __init__(self, config: dict, client_pri, client_pub):
+    def __init__(self, config, client_pri, client_pub):
+        """
+        Initialisiert GridBot
+        
+        Args:
+            config: GridBotConfig (Pydantic-Objekt)
+            client_pri: Private HTTP Client
+            client_pub: Public HTTP Client
+        """
         self.config = config
         self.client_pri = client_pri
         self.client_pub = client_pub
-        self.symbol = config["symbol"]
-        self.dry_run = config["trading"].get("dry_run", True)
-        self.update_interval = config["system"].get("update_interval", 5)
+        
+        # === Objekt-Zugriff statt Dict ===
+        self.symbol = config.symbol
+        self.dry_run = config.trading.dry_run
+        self.update_interval = config.system.update_interval
         self._stop = False
 
         # === API Instanzen ===
@@ -89,10 +95,10 @@ class GridBot:
         # === Account-Information ===
         self.account_sync = AccountSync(client_pri, self.symbol)
 
-        # 🧩 Pending Orders einmalig laden (HTTP)
+        # Pending Orders einmalig laden (HTTP)
         self.account_sync.preload_pending_orders()
 
-        # 🔗 OrderSync mit AccountSync verbinden
+        # OrderSync mit AccountSync verbinden
         self.grid.attach_account_sync(self.account_sync)
 
 
@@ -113,14 +119,14 @@ class GridBot:
                 self.grid.update(last_price)
     
     async def _on_private_ws(self, channel, data):
-        """Callback für Private WebSocket (Order-, Position-, Balance-Events)."""
+        """Callback für Private WebSocket"""
         await self.account_sync.on_ws_event(channel, data)
 
     # ---------------------------------------------------------------------
     # Hauptloop mit Auto-Recovery
     # ---------------------------------------------------------------------
     async def run(self):
-        """Startet den GRID-Bot inklusive WebSocket-Clients, Lifecycle und Auto-Recovery."""
+        """Startet den GRID-Bot"""
         logger.info("=" * 60)
         logger.info(f"🤖 Starte GRID Bot für {self.symbol}")
         logger.info("=" * 60)
@@ -143,20 +149,20 @@ class GridBot:
         ])
 
         try:
-            # === Hauptloop: Statusanzeige, Fehlerüberwachung und Recovery ===
+            # === Hauptloop ===
             while not self._stop:
                 state = self.grid.lifecycle.state
 
-                # 🧩 Automatischer OrderSync-Check alle 10 Minuten
+                # Auto-OrderSync alle 10 Minuten
                 if not hasattr(self, "_last_sync_check"):
                     self._last_sync_check = 0
 
                 now = time.time()
-                if now - self._last_sync_check >= 60:  # 600 Sekunden = 10 Minuten
+                if now - self._last_sync_check >= 600:
                     self._last_sync_check = now
                     asyncio.create_task(self._auto_sync_check())
 
-                # 🔴 Fehlerzustand → Retry prüfen
+                # Fehlerzustand → Retry prüfen
                 if state == GridState.ERROR:
                     if self.grid.lifecycle.can_retry():
                         logger.warning(f"[{self.symbol}] ⚠️  Fehler erkannt – starte Auto-Recovery ...")
@@ -176,19 +182,19 @@ class GridBot:
                         await asyncio.sleep(5)
                         continue
 
-                # 🟡 Pausiert → Warten
+                # Pausiert → Warten
                 elif state == GridState.PAUSED:
                     logger.warning(f"[{self.symbol}] ⏸️  Grid pausiert – warte auf Wiederaufnahme ...")
                     await asyncio.sleep(5)
                     continue
 
-                # 🟢 Aktiv → normaler Betrieb
+                # Aktiv → normaler Betrieb
                 elif state == GridState.ACTIVE:
                     self.grid.print_grid_status()
                     self.account_sync.sync(ws_enabled=True)
                     await asyncio.sleep(self.update_interval)
 
-                # 🔚 Geschlossen oder Init → kurz warten
+                # Geschlossen oder Init
                 elif state in (GridState.CLOSED, GridState.INIT):
                     await asyncio.sleep(2)
 
@@ -212,21 +218,20 @@ class GridBot:
             logger.info("✅ Bot sauber beendet.")
 
     # ---------------------------------------------------------------------
-    # Automatischer OrderSync-DryRun (Hintergrund)
+    # Automatischer OrderSync-DryRun
     # ---------------------------------------------------------------------
     async def _auto_sync_check(self):
-        """
-        Führt periodisch einen Dry-Run-OrderSync durch,
-        um Abweichungen zwischen Grid-Levels und offenen Orders zu erkennen.
-        """
+        """Periodischer Dry-Run-OrderSync"""
         try:
             result = await self.grid.sync_orders()
             logger.info(
                 f"[{self.symbol}] 🔍 Auto-OrderSync: "
-                f"MATCHED={result['matched']} | MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
+                f"MATCHED={result['matched']} | MISSING={result['missing']} | "
+                f"OBSOLETE={result['obsolete']}"
             )
         except Exception as e:
             logger.error(f"[{self.symbol}] Fehler beim Auto-OrderSync: {e}")
+
 
 # ============================================================
 # MAIN ENTRY
@@ -241,20 +246,21 @@ async def main():
     parser.add_argument(
         "--sync",
         action="store_true",
-        help="Führe OrderSync im Dry-Run-Modus aus (prüft Orders, keine Trades)"
+        help="Führe OrderSync im Dry-Run-Modus aus"
     )
     args = parser.parse_args()
 
     # === Config laden ===
     strategy_dir = Path(__file__).parent
     os.chdir(strategy_dir)
-    config = load_config(args.config)
+    config = load_config(args.config)  # Gibt jetzt GridBotConfig zurück
     os.chdir(root_dir)
 
-    symbol = config["symbol"]
+    # === Objekt-Zugriff statt Dict ===
+    symbol = config.symbol
 
     # === Logging einrichten ===
-    setup_logging(symbol=symbol, strategy="GRID", debug=config["system"]["debug"])
+    setup_logging(symbol=symbol, strategy="GRID", debug=config.system.debug)
 
     # === API-Clients ===
     cfg = Config()

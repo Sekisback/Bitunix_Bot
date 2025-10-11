@@ -27,3 +27,6 @@ urllib3==2.5.0
 uv==0.8.24
 websockets==15.0.1
 Werkzeug==3.1.3
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+rich>=13.0.0
