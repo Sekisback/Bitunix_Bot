@@ -1,0 +1,77 @@
+# strategies/GRID/logging_config.yaml
+# Hierarchisches Logging für Grid Bot
+
+version: 1
+disable_existing_loggers: false
+
+formatters:
+  standard:
+    format: '%(asctime)s | %(levelname)-8s | %(name)-20s | %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+  
+  detailed:
+    format: '%(asctime)s | %(levelname)-8s | %(name)-20s | %(filename)s:%(lineno)d | %(message)s'
+    datefmt: '%Y-%m-%d %H:%M:%S'
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: standard
+    stream: ext://sys.stdout
+  
+  file:
+    class: logging.handlers.RotatingFileHandler
+    level: DEBUG
+    formatter: detailed
+    filename: logs/grid_bot.log
+    maxBytes: 10485760  # 10MB
+    backupCount: 5
+    encoding: utf8
+
+loggers:
+  # Bot-spezifische Logger
+  GridManager:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  OrderSync:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  AccountSync:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  GridLifecycle:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  GRID-BOT:
+    level: INFO
+    handlers: [console, file]
+    propagate: false
+  
+  # Core Module (leiser)
+  core:
+    level: WARNING
+    handlers: [file]
+    propagate: false
+  
+  websockets:
+    level: ERROR
+    handlers: [file]
+    propagate: false
+  
+  asyncio:
+    level: ERROR
+    handlers: [file]
+    propagate: false
+
+root:
+  level: INFO
+  handlers: [console, file]

@@ -6,14 +6,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Callable, Dict, Set
 
-
 class GridState(str, Enum):
     INIT = "INIT"
     ACTIVE = "ACTIVE"
     PAUSED = "PAUSED"
     ERROR = "ERROR"
     CLOSED = "CLOSED"
-
 
 ALLOWED_TRANSITIONS: Dict[GridState, Set[GridState]] = {
     GridState.INIT:   {GridState.ACTIVE, GridState.ERROR, GridState.CLOSED},
@@ -23,12 +21,11 @@ ALLOWED_TRANSITIONS: Dict[GridState, Set[GridState]] = {
     GridState.CLOSED: set(),
 }
 
-
 @dataclass
 class GridLifecycle:
     symbol: str
     on_state_change: Optional[Callable[[GridState, GridState, Optional[str]], None]] = None
-    logger: logging.Logger = field(default_factory=lambda: logging.getLogger(__name__))
+    logger: logging.Logger = field(default_factory=lambda: logging.getLogger("GridLifecycle"))
     state: GridState = field(default=GridState.INIT, init=False)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc), init=False)

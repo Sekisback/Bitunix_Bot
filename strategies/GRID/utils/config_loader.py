@@ -11,6 +11,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from utils.error_format import format_validation_error
+from utils.exceptions import ConfigValidationError  # ← NEU
 
 console = Console()
 
@@ -35,12 +36,27 @@ def load_config(coin_symbol: str) -> GridBotConfig:
     coin_path = config_dir / f"{coin_symbol}.yaml"
 
     # === Base laden ===
-    with open(base_path, "r", encoding="utf-8") as f:
-        base_dict = yaml.safe_load(f)
+    if not base_path.exists():
+        raise ConfigValidationError(f"Base-Config fehlt: {base_path}")
+    
+    try:
+        with open(base_path, "r", encoding="utf-8") as f:
+            base_dict = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ConfigValidationError(f"YAML-Fehler in base.yaml: {e}")
 
     # === Coin laden ===
-    with open(coin_path, "r", encoding="utf-8") as f:
-        coin_dict = yaml.safe_load(f)
+    if not coin_path.exists():
+        raise ConfigValidationError(
+            f"Coin-Config fehlt: {coin_path}\n"
+            f"Verfügbare: {list(config_dir.glob('*.yaml'))}"
+        )
+    
+    try:
+        with open(coin_path, "r", encoding="utf-8") as f:
+            coin_dict = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ConfigValidationError(f"YAML-Fehler in {coin_symbol}.yaml: {e}")
 
     # === Merge und validieren ===
     merged = merge_configs(base_dict, coin_dict)
@@ -79,8 +95,9 @@ def load_config(coin_symbol: str) -> GridBotConfig:
                 title="[red]Ergebnis[/red]",
             )
         )
-        import sys
-        sys.exit(1)
+        
+        # ← NEU: Werfe ConfigValidationError statt sys.exit
+        raise ConfigValidationError(f"Config-Validierung fehlgeschlagen: {e}")
 
 
 def print_config(config: GridBotConfig, title: str = "Geladene Config"):

@@ -14,6 +14,10 @@ from pathlib import Path
 GRID_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(GRID_DIR))
 from models.config_models import GridMode, TPMode, SLMode
+from utils.exceptions import (
+    InvalidGridConfigError, OrderPlacementError,
+    PriceOutOfRangeError, GridInitializationError
+)
 
 @dataclass
 class GridLevel:
@@ -46,21 +50,17 @@ class GridManager:
         self.levels: List[GridLevel] = []
         self._price_list: List[float] = []
         self.last_rebalance: float = 0.0
-        
-        # Race Condition Fix: Lock für Level-Zugriffe
         self._levels_lock = asyncio.Lock()
-        
-        # Preisraster-Cache: Hash der Grid-Config
         self._grid_config_hash: Optional[str] = None
 
-        self.logger = logging.getLogger(f"GridManager-{self.symbol}")
+        self.logger = logging.getLogger("GridManager")
         level_name = self.system.log_level.upper()
         self.logger.setLevel(getattr(logging, level_name, logging.INFO))
         self.lifecycle = GridLifecycle(self.symbol, on_state_change=self._on_state_change)
 
         raw_dry = self.trading.dry_run
-        self.logger.info(f"[{self.symbol}] ⚙️ Trading-Block geladen: {self.trading}")
-        self.logger.info(f"[{self.symbol}] ⚙️ Dry-Run Wert: {raw_dry!r} (Typ: {type(raw_dry).__name__})")
+        self.logger.info(f"[{self.symbol}] ⚙️ Trading-Block geladen")
+        self.logger.debug(f"[{self.symbol}] Dry-Run: {raw_dry!r}")
 
         try:
             self.validate_config()
@@ -80,24 +80,34 @@ class GridManager:
                 client=self.client, size=self._effective_order_size(),
                 grid_direction=self.grid_direction,
             )
+        except (InvalidGridConfigError, GridInitializationError) as e:
+            self.lifecycle.set_state(GridState.ERROR, message=str(e))
+            raise
         except Exception as e:
             self.lifecycle.set_state(GridState.ERROR, message=f"Init-Fehler: {e}")
-            raise
+            raise GridInitializationError(f"Grid-Initialisierung fehlgeschlagen: {e}")
 
     def validate_config(self) -> None:
+        """Config-Validierung mit spezifischen Exceptions"""
         lower = self.grid_conf.lower_price
         upper = self.grid_conf.upper_price
         n = self.grid_conf.grid_levels
+        
         if upper <= lower:
-            raise ValueError(f"upper_price ({upper}) muss größer als lower_price ({lower}) sein")
+            raise InvalidGridConfigError(
+                f"upper_price ({upper}) muss größer als lower_price ({lower}) sein"
+            )
         if n < 2:
-            raise ValueError(f"grid_levels ({n}) muss mindestens 2 sein")
+            raise InvalidGridConfigError(
+                f"grid_levels ({n}) muss mindestens 2 sein"
+            )
         tick = float(self.grid_conf.min_price_step)
         if tick <= 0.0:
-            raise ValueError(f"min_price_step ({tick}) muss > 0 sein")
+            raise InvalidGridConfigError(
+                f"min_price_step ({tick}) muss > 0 sein"
+            )
 
     def _compute_grid_hash(self) -> str:
-        """Berechnet Hash der Grid-Config für Cache"""
         config_str = (
             f"{self.grid_conf.lower_price}|{self.grid_conf.upper_price}|"
             f"{self.grid_conf.grid_levels}|{self.grid_conf.grid_mode.value}|"
@@ -106,10 +116,9 @@ class GridManager:
         return hashlib.md5(config_str.encode()).hexdigest()
 
     def _build_price_list(self) -> None:
-        """Baut Preisraster (mit Cache)"""
         current_hash = self._compute_grid_hash()
         if self._grid_config_hash == current_hash and self._price_list:
-            self.logger.debug("Preisraster-Cache hit – keine Neuberechnung nötig")
+            self.logger.debug("Preisraster-Cache hit")
             return
         
         lower = float(self.grid_conf.lower_price)
@@ -123,7 +132,7 @@ class GridManager:
             ratio = (upper / lower) ** (1.0 / n)
             prices = [lower * (ratio ** i) for i in range(n + 1)]
         else:
-            raise ValueError(f"Unbekannter grid_mode: {self.grid_conf.grid_mode}")
+            raise InvalidGridConfigError(f"Unbekannter grid_mode: {self.grid_conf.grid_mode}")
 
         prices = [self._round_to_tick(p) for p in prices]
         self._price_list = prices
@@ -152,14 +161,14 @@ class GridManager:
     def _effective_order_size(self) -> float:
         base_size = float(self.grid_conf.base_order_size)
         if base_size <= 0.0:
-            self.logger.error("base_order_size <= 0 – keine Order möglich.")
+            self.logger.error("base_order_size <= 0")
             return 0.0
         if self.risk_conf.include_fees:
             fee_side = self.risk_conf.fee_side.lower()
             fee_pct = (self.risk_conf.maker_fee_pct if fee_side == "maker" else self.risk_conf.taker_fee_pct)
             effective_fee = fee_pct * 2.0
             size = base_size * (1.0 - effective_fee)
-            self.logger.debug(f"[FeeCalc] base={base_size} fee_side={fee_side} fee_pct={fee_pct} x2={effective_fee:.6f} → effective_size={size:.8f}")
+            self.logger.debug(f"[FeeCalc] base={base_size} → effective={size:.8f}")
         else:
             size = base_size
         return max(0.0, round(size, 8))
@@ -168,15 +177,14 @@ class GridManager:
         now = time.time()
         interval = int(self.grid_conf.rebalance_interval)
         if now - self.last_rebalance >= interval:
-            self.logger.info("Rebalancing: Prüfe ob Neuberechnung nötig...")
-            self._build_price_list()  # Nutzt jetzt Cache
+            self.logger.info("Rebalancing...")
+            self._build_price_list()
             self._create_grid_levels()
             self.last_rebalance = now
 
     def update(self, current_price: float) -> None:
         try:
             if not self.lifecycle.is_active():
-                self.logger.debug("Grid pausiert – update() übersprungen.")
                 return
             self._maybe_rebalance()
             entry_on_touch = bool(self.strategy.entry_on_touch)
@@ -196,7 +204,6 @@ class GridManager:
             self.lifecycle.set_state(GridState.ERROR, str(e))
 
     def _take_profit_for(self, entry_price: float, level_index: int, side: str = "BUY") -> Optional[float]:
-        """TP-Berechnung mit Edge-Case Fix für Short"""
         if self.grid_conf.tp_mode == TPMode.NEXT_GRID:
             if side.upper() == "BUY":
                 if level_index < len(self._price_list) - 1:
@@ -204,17 +211,12 @@ class GridManager:
                 else:
                     step = self._price_list[-1] - self._price_list[-2]
                     tp = entry_price + step
-            else:  # SHORT/SELL
-                # TP/SL Bug Fix: Edge-Case bei Index 0
+            else:
                 if level_index > 0:
                     tp = self._price_list[level_index - 1]
                 else:
-                    if level_index > 0:
-                        tp = self._price_list[level_index - 1]
-                    else:
-                        step = self._price_list[1] - self._price_list[0]
-                        tp = entry_price - step
-                        
+                    step = self._price_list[1] - self._price_list[0]
+                    tp = entry_price - step
         elif self.grid_conf.tp_mode == TPMode.PERCENT:
             pct = float(self.grid_conf.take_profit_pct)
             if side.upper() == "BUY":
@@ -241,12 +243,12 @@ class GridManager:
     def _place_entry(self, level: GridLevel) -> None:
         size = self._effective_order_size()
         if size <= 0:
-            self.logger.warning("Effektive Ordergröße 0 – keine Order.")
+            self.logger.warning("Effektive Ordergröße 0")
             return
         tp = level.tp
         sl = level.sl
         if self.trading.dry_run:
-            self.logger.info(f"[SIM] {level.side} {self.symbol} @ {level.price} | size={size} | TP={tp} | SL={sl}")
+            self.logger.info(f"[SIM] {level.side} @ {level.price} | size={size} | TP={tp} | SL={sl}")
             level.active, level.tp, level.sl = True, tp, sl
             return
         try:
@@ -257,38 +259,38 @@ class GridManager:
                 margin_mode=self.config.margin.mode,
             )
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
-            self.logger.info(f"{level.side} Order platziert: id={order_id} @ {level.price}")
+            self.logger.info(f"{level.side} Order @ {level.price} → ID={order_id}")
         except Exception as e:
-            self.handle_error(e)
+            raise OrderPlacementError(f"Order @ {level.price} fehlgeschlagen: {e}")
 
     def handle_error(self, error: Exception):
         msg = f"{type(error).__name__}: {error}"
-        self.logger.exception(f"[{self.symbol}] Fehler im Grid: {msg}")
+        self.logger.exception(f"[{self.symbol}] Fehler: {msg}")
         self.lifecycle.set_state(GridState.ERROR, message=msg)
 
     def pause(self, reason: str = None):
-        self.logger.warning(f"[{self.symbol}] Grid pausiert: {reason or 'kein Grund angegeben'}")
+        self.logger.warning(f"[{self.symbol}] Grid pausiert: {reason or ''}")
         try:
             self.lifecycle.set_state(GridState.PAUSED, message=reason)
         except ValueError as e:
-            self.logger.error(f"[{self.symbol}] Pause-Fehler: {e}")
+            self.logger.error(f"Pause-Fehler: {e}")
 
     def resume(self):
         try:
             self.lifecycle.set_state(GridState.ACTIVE)
-            self.logger.info(f"[{self.symbol}] Grid wieder aktiv.")
+            self.logger.info(f"[{self.symbol}] Grid aktiv")
         except ValueError as e:
-            self.logger.error(f"[{self.symbol}] Resume-Fehler: {e}")
+            self.logger.error(f"Resume-Fehler: {e}")
 
     def stop(self):
         try:
             self.lifecycle.set_state(GridState.CLOSED)
-            self.logger.info(f"[{self.symbol}] Grid geschlossen.")
+            self.logger.info(f"[{self.symbol}] Grid geschlossen")
         except ValueError as e:
-            self.logger.error(f"[{self.symbol}] Stop-Fehler: {e}")
+            self.logger.error(f"Stop-Fehler: {e}")
 
     def _on_state_change(self, old_state: GridState, new_state: GridState, message: str = None):
-        self.logger.info(f"[{self.symbol}] Lifecycle: {old_state.value} → {new_state.value} ({message or ''})")
+        self.logger.info(f"[{self.symbol}] {old_state.value} → {new_state.value}")
         if new_state == GridState.ERROR:
             self._handle_critical_error(message)
         elif new_state == GridState.CLOSED:
@@ -298,7 +300,7 @@ class GridManager:
         self.logger.error(f"[{self.symbol}] Kritischer Fehler: {message}")
 
     def _cleanup(self):
-        self.logger.debug(f"[{self.symbol}] Grid Cleanup abgeschlossen")
+        self.logger.debug(f"[{self.symbol}] Cleanup")
 
     def print_grid_status(self):
         total = len(self.levels)
@@ -308,29 +310,24 @@ class GridManager:
 
     def log_summary(self) -> None:
         self.logger.info("=" * 60)
-        self.logger.info(f"=== GRID SUMMARY ({self.symbol}) ===")
+        self.logger.info(f"GRID SUMMARY ({self.symbol})")
         self.logger.info("=" * 60)
-        self.logger.info(f"Grid Direction: {self.grid_direction}")
-        self.logger.info(f"Grid Mode: {self.grid_conf.grid_mode.value}")
+        self.logger.info(f"Direction: {self.grid_direction}")
+        self.logger.info(f"Mode: {self.grid_conf.grid_mode.value}")
         self.logger.info(f"Levels: {len(self.levels)} ({self.grid_conf.lower_price} → {self.grid_conf.upper_price})")
         self.logger.info(f"Base Size: {self.grid_conf.base_order_size}")
         self.logger.info(f"TP: {self.grid_conf.tp_mode.value} | SL: {self.grid_conf.sl_mode.value}")
-        self.logger.info(f"Fees: include={self.risk_conf.include_fees} side={self.risk_conf.fee_side}")
-        self.logger.info(f"Rebalance Interval: {self.grid_conf.rebalance_interval}s")
 
     async def sync_orders(self, dry_run=None):
         if dry_run is None:
             dry_run = self.trading.dry_run
-        self.logger.info(f"[{self.symbol}] Starte OrderSync — Modus: {'Dry-Run' if dry_run else 'Real'}")
-        
-        # Race Condition Fix: Lock verwenden
+        self.logger.info(f"[{self.symbol}] OrderSync {'Dry-Run' if dry_run else 'Real'}")
         async with self._levels_lock:
             result = await self.order_sync.sync_orders(dry_run=dry_run)
-        
-        self.logger.info(f"[{self.symbol}] OrderSync-Ergebnis: {result}")
+        self.logger.info(f"[{self.symbol}] Sync: {result}")
         return result
 
     def attach_account_sync(self, account_sync):
         self.account_sync = account_sync
         self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
-        self.logger.info(f"[{self.symbol}] OrderSync mit AccountSync verbunden.")
+        self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
