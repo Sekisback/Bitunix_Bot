@@ -12,7 +12,7 @@ symbol: "ONDOUSDT"       # Platzhalter, wird in Coin-Config überschrieben
 # ⚙️ TRADING-GRUNDEINSTELLUNGEN
 # -----------------------------------------------------------------------------
 trading:
-  dry_run: false              # true = Simulation ohne echte Orders
+  dry_run: true              # true = Simulation ohne echte Orders
   grid_direction: "short"    # "long", "short" oder "both" – Handelsrichtung
   client_id_prefix: "GRID"   # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
 
@@ -20,8 +20,8 @@ trading:
 # 📊 GRID-PARAMETER
 # -----------------------------------------------------------------------------
 grid:
-  upper_price: 1.1          # Obere Preisgrenze des Grids (Coin-spezifisch)
-  lower_price: 1.0          # Untere Preisgrenze des Grids (Coin-spezifisch)
+  upper_price: 1.1           # Obere Preisgrenze des Grids (Coin-spezifisch)
+  lower_price: 1.0           # Untere Preisgrenze des Grids (Coin-spezifisch)
   grid_levels: 2             # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
 
   base_order_size: 20        # Grund-Ordergröße (Coin-spezifisch)

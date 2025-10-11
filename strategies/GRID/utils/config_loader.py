@@ -7,7 +7,10 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any
 from models.config_models import GridBotConfig
+from rich.console import Console
+from utils.error_format import format_validation_error
 
+console = Console()
 
 def merge_configs(base: Dict, override: Dict) -> Dict:
     """Merged zwei Configs rekursiv (wie bisher)"""
@@ -20,24 +23,6 @@ def merge_configs(base: Dict, override: Dict) -> Dict:
             result[key] = value
     
     return result
-
-
-def suggest_fix(error_msg: str) -> str:
-    """Schlägt Lösung basierend auf Fehlermeldung vor"""
-    fixes = {
-        "upper_price": "💡 Setze upper_price > lower_price",
-        "grid_levels": "💡 Setze grid_levels zwischen 2 und 100",
-        "base_order_size": "💡 base_order_size muss > 0 sein",
-        "dry_run": "💡 Nutze true/false ohne Anführungszeichen",
-        "leverage": "💡 Hebel muss zwischen 1 und 125 liegen",
-        "stop_loss_price": "💡 Bei sl_mode: fixed muss stop_loss_price gesetzt sein",
-    }
-    
-    for keyword, fix in fixes.items():
-        if keyword in error_msg.lower():
-            return fix
-    
-    return "💡 Prüfe die Doku: strategies/GRID/docs/config_guide.md"
 
 
 def load_config(coin_symbol: str) -> GridBotConfig:
@@ -55,60 +40,57 @@ def load_config(coin_symbol: str) -> GridBotConfig:
         ValueError: Config ungültig
     """
     config_dir = Path(__file__).parent.parent / "configs"
-    
+
     # === 1. Base laden und prüfen ===
-    print(f"\n🔍 Prüfe base.yaml...")
+    console.print(f"\n[cyan]🔍 Prüfe base.yaml...[/cyan]")
     base_path = config_dir / "base.yaml"
-    
+
     if not base_path.exists():
         raise FileNotFoundError(f"Base-Config fehlt: {base_path}")
-    
+
     with open(base_path, 'r', encoding='utf-8') as f:
         base_dict = yaml.safe_load(f)
-    
+
     try:
-        # Prüfe ob base alleine valide wäre
         GridBotConfig(**base_dict)
-        print(f"✅ base.yaml ist valide")
+        console.print("[green]✅ base.yaml ist valide[/green]")
     except Exception as e:
-        print(f"❌ Fehler in base.yaml:")
-        print(f"   {e}")
-        print(f"   {suggest_fix(str(e))}")
+        console.print("[red]❌ Fehler in base.yaml:[/red]")
+        console.print(format_validation_error(e))
         raise ValueError(f"Base-Config ungültig: {e}")
-    
+
     # === 2. Coin-Config laden ===
-    print(f"🔍 Prüfe {coin_symbol}.yaml...")
+    console.print(f"\n[cyan]🔍 Prüfe {coin_symbol}.yaml...[/cyan]")
     coin_path = config_dir / f"{coin_symbol}.yaml"
-    
+
     if not coin_path.exists():
         raise FileNotFoundError(
             f"Coin-Config fehlt: {coin_path}\n"
             f"Verfügbare: {list(config_dir.glob('*.yaml'))}"
         )
-    
+
     with open(coin_path, 'r', encoding='utf-8') as f:
         coin_dict = yaml.safe_load(f)
-    
+
     # === 3. Merge und final validieren ===
     merged = merge_configs(base_dict, coin_dict)
-    
+
     try:
         config = GridBotConfig(**merged)
-        
-        # Erfolgsmeldung
-        print(f"✅ {coin_symbol}.yaml + base.yaml = valide")
-        print(f"   📊 Symbol: {config.symbol}")
-        print(f"   📈 Grid: {config.grid.lower_price} → {config.grid.upper_price}")
-        print(f"   🎚️  Levels: {config.grid.grid_levels}")
-        print(f"   🧪 Dry-Run: {config.trading.dry_run}")
-        
+        console.print(f"[green]✅ {coin_symbol}.yaml + base.yaml = valide[/green]")
+        console.print(f"   📊 Symbol: {config.symbol}")
+        console.print(f"   📈 Grid: {config.grid.lower_price} → {config.grid.upper_price}")
+        console.print(f"   🎚️ Levels: {config.grid.grid_levels}")
+        console.print(f"   🧪 Dry-Run: {config.trading.dry_run}")
         return config
-        
+
     except Exception as e:
-        print(f"❌ Fehler nach Merge von {coin_symbol}.yaml:")
-        print(f"   {e}")
-        print(f"   {suggest_fix(str(e))}")
-        raise ValueError(f"Config-Validierung fehlgeschlagen: {e}")
+        console.print(f"[red]❌ Fehler nach Merge von {coin_symbol}.yaml:[/red]")
+        console.print(format_validation_error(e))
+        # 🚫 Kein weiterer Raise → verhindert hässlichen Traceback
+        import sys
+        sys.exit(1)
+
 
 
 def print_config(config: GridBotConfig, title: str = "Geladene Config"):

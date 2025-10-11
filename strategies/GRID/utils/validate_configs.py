@@ -18,7 +18,8 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from models.config_models import GridBotConfig
-from config_loader import merge_configs, suggest_fix
+from utils.config_loader import merge_configs
+from utils.error_format import format_validation_error
 
 console = Console()
 
@@ -55,7 +56,11 @@ def format_validation_error(error: Exception) -> str:
                 elif 'greater than' in msg.lower():
                     msg = msg.replace('Input should be greater than', 'muss >')
                 
-                errors.append(f"  • {field}: {msg}")
+                # 💄 Präfix nur, wenn Feld vorhanden
+                if field:
+                    errors.append(f"❌ {field}: {msg}")
+                else:
+                    errors.append(f"❌ {msg}")
             
             return '\n'.join(errors)
     except ImportError:
@@ -78,10 +83,10 @@ def validate_all_configs():
     console.rule("[bold cyan]🔍 Grid Bot Config Validator[/bold cyan]")
     config_dir = GRID_DIR / "configs"
     
-    table = Table(title="Validierungs-Ergebnisse", show_lines=True)
-    table.add_column("Config", style="cyan", width=20)
+    table = Table(title="Validierungs-Ergebnisse", show_lines=True, expand=True)
+    table.add_column("Config", style="cyan", width=10)
     table.add_column("Status", style="bold", width=10)
-    table.add_column("Details", width=50)
+    table.add_column("Details", overflow="fold")
     
     all_valid = True
     
@@ -100,8 +105,7 @@ def validate_all_configs():
     except Exception as e:
         all_valid = False
         clean_error = format_validation_error(e)
-        suggestion = suggest_fix(str(e))
-        error_text = f"{clean_error}\n\n{suggestion}"
+        error_text = clean_error
         table.add_row("base.yaml", "❌ FEHLER", error_text)
         console.print(f"[red]✗ base.yaml hat Fehler[/red]")
     
@@ -136,8 +140,7 @@ def validate_all_configs():
         except Exception as e:
             all_valid = False
             clean_error = format_validation_error(e)
-            suggestion = suggest_fix(str(e))
-            error_text = f"{clean_error}\n\n{suggestion}"
+            error_text = clean_error
             table.add_row(coin_path.name, "❌ FEHLER", error_text)
             console.print(f"[red]✗ {coin_path.name} hat Fehler[/red]")
     
@@ -156,7 +159,7 @@ def validate_all_configs():
     else:
         console.print(Panel(
             "❌ [bold red]Es gibt Fehler in den Configs![/bold red]\n\n"
-            "Siehe Tabelle oben für Details und Lösungsvorschläge.\n"
+            "Siehe Tabelle oben für Details. "
             "Korrigiere die Fehler und führe den Validator erneut aus.",
             title="Ergebnis",
             border_style="red"
