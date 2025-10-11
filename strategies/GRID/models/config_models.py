@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal, Optional
 from enum import Enum
+from typing import List
 
 
 # === Enums für typsichere Auswahl ===
@@ -99,6 +100,26 @@ class MarginConfig(BaseModel):
     leverage: int = Field(default=3, ge=1, le=125)
     auto_reduce_only: bool = False
 
+class HedgeConfig(BaseModel):
+    enabled: bool = Field(default=False, description="Aktiviert das Hedge-Management")
+    mode: Literal["direct", "dynamic", "reversal"] = "direct"
+    trigger_offset: float = Field(default=1.0, ge=0.0, description="Multiplikator auf grid_step für Hedge-Trigger")
+    partial_levels: List[float] = Field(
+        default_factory=lambda: [0.5, 0.75, 1.0],
+        description="Prozentuale Hedge-Stufen (nur für dynamic mode)"
+    )
+    close_on_reentry: bool = Field(default=True, description="Hedge schließen, wenn Preis wieder in Grid-Range")
+    size_mode: Literal["net_position", "fixed"] = "net_position"
+    fixed_size_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Hedgegröße relativ zur Position, falls fixed")
+
+    @model_validator(mode="after")
+    def validate_hedge_logic(self):
+        """Validiert Hedge-abhängige Einstellungen"""
+        if self.mode == "dynamic" and not self.partial_levels:
+            raise ValueError("Dynamic Hedge benötigt mindestens eine partial_level-Angabe")
+        if self.size_mode == "fixed" and self.fixed_size_ratio <= 0:
+            raise ValueError("Bei size_mode='fixed' muss fixed_size_ratio > 0 sein")
+        return self
 
 class StrategyConfig(BaseModel):
     entry_on_touch: bool = True
@@ -113,6 +134,7 @@ class GridBotConfig(BaseModel):
     grid: GridConfig
     risk: RiskConfig = Field(default_factory=RiskConfig)
     margin: MarginConfig = Field(default_factory=MarginConfig)
+    hedge: HedgeConfig = Field(default_factory=HedgeConfig) 
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
 
     @model_validator(mode='after')

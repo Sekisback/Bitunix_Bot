@@ -6,78 +6,90 @@
 # und überschreiben nur die relevanten Felder (z.B. Preise, Ordergrößen).
 # =============================================================================
 
-symbol: "BASECOIN"       # Platzhalter, wird in Coin-Config überschrieben
+symbol: "BASECOIN"                  # Platzhalter, wird in Coin-Config überschrieben
 
 # -----------------------------------------------------------------------------
 # 🧠 SYSTEMKONFIGURATION
 # -----------------------------------------------------------------------------
 system:
-  debug: false               # true = erweiterte Debug-Ausgaben aktivieren
-  update_interval: 5         # Sekunden zwischen Grid-Updates im Hauptloop
-  reconnect_interval: 5      # Sekunden zwischen Reconnects (z.B. bei WebSocket)
-  backtest_bars: 200         # Max. Anzahl historischer Bars (Bitunix-Limit)
-  timezone_offset: 2         # Zeitzonen-Offset (z. B. Europa/Berlin = +2)
-  log_to_file: true          # true = schreibt Logs zusätzlich in Datei
-  log_level: "INFO"          # "DEBUG", "INFO", "WARNING", "ERROR"
+  debug: false                      # true = erweiterte Debug-Ausgaben aktivieren
+  update_interval: 5                # Sekunden zwischen Grid-Updates im Hauptloop
+  reconnect_interval: 5             # Sekunden zwischen Reconnects (z.B. bei WebSocket)
+  backtest_bars: 200                # Max. Anzahl historischer Bars (Bitunix-Limit)
+  timezone_offset: 2                # Zeitzonen-Offset (z. B. Europa/Berlin = +2)
+  log_to_file: true                 # true = schreibt Logs zusätzlich in Datei
+  log_level: "INFO"                 # "DEBUG", "INFO", "WARNING", "ERROR"
 
 # -----------------------------------------------------------------------------
 # 🧾 LOGGING-EINSTELLUNGEN
 # -----------------------------------------------------------------------------
 logging:
-  log_dir: "logs"            # Zielverzeichnis für Log-Dateien
+  log_dir: "logs"                   # Zielverzeichnis für Log-Dateien
   filename_pattern: "GRID_{symbol}_{date}.log"  # Muster für Log-Dateinamen
-  rotate_daily: true         # true = tägliche Logrotation aktivieren
-  max_size_mb: 10            # Maximale Größe pro Log-Datei (MB)
+  rotate_daily: true                # true = tägliche Logrotation aktivieren
+  max_size_mb: 10                   # Maximale Größe pro Log-Datei (MB)
 
 # -----------------------------------------------------------------------------
 # ⚙️ TRADING-GRUNDEINSTELLUNGEN
 # -----------------------------------------------------------------------------
 trading:
-  dry_run: true              # true = Simulation ohne echte Orders
-  grid_direction: "both"     # "long", "short" oder "both" – Handelsrichtung
-  client_id_prefix: "GRID"   # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
+  dry_run: true                     # true = Simulation ohne echte Orders
+  grid_direction: "both"            # "long", "short" oder "both" – Handelsrichtung
+  client_id_prefix: "GRID"          # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
 
 # -----------------------------------------------------------------------------
 # 📊 GRID-PARAMETER
 # -----------------------------------------------------------------------------
 grid:  
-  upper_price: 20.0          # Obere Preisgrenze des Grids (Coin-spezifisch)
-  lower_price: 10.0          # Untere Preisgrenze des Grids (Coin-spezifisch)
-  grid_levels: 10            # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
-  grid_mode: "arithmetic"    # "arithmetic" oder "geometric" (Preisverteilung)
-  min_price_step: 0.0000001  # Minimales Tick-Intervall für Rundungen in grid_mode "geometric"
+  upper_price: 20.0                 # Obere Preisgrenze des Grids (Coin-spezifisch)
+  lower_price: 10.0                 # Untere Preisgrenze des Grids (Coin-spezifisch)
+  grid_levels: 10                   # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
+  grid_mode: "arithmetic"           # "arithmetic" oder "geometric" (Preisverteilung)
+  min_price_step: 0.0000001         # Minimales Tick-Intervall für Rundungen in grid_mode "geometric"
 
-  base_order_size: 0.01      # Grund-Ordergröße (Coin-spezifisch)
-  active_rebuy: true         # Nach Fill erneut Order am selben Level platzieren
+  base_order_size: 0.01             # Grund-Ordergröße (Coin-spezifisch)
+  active_rebuy: true                # Nach Fill erneut Order am selben Level platzieren
 
-  tp_mode: "percent"         # "percent" oder "next_grid"
-  take_profit_pct: 0.003     # Nur aktiv, wenn tp_mode = "percent"
+  tp_mode: "percent"                # "percent" oder "next_grid"
+  take_profit_pct: 0.003            # Nur aktiv, wenn tp_mode = "percent"
 
-  sl_mode: "percent"         # "percent", "fixed" oder "none"
-  stop_loss_pct: 0.01        # Nur aktiv, wenn sl_mode = "percent"
-  # stop_loss_price: 0.0     # Nur bei sl_mode = "fixed" aktiv
+  sl_mode: "percent"                # "percent", "fixed" oder "none"
+  stop_loss_pct: 0.01               # Nur aktiv, wenn sl_mode = "percent"
+  stop_loss_price: 0.1              # Nur bei sl_mode = "fixed" aktiv
 
-  rebalance_interval: 300    # Sekunden zwischen automatischem Rebalancing
+  rebalance_interval: 300           # Sekunden zwischen automatischem Rebalancing
 
 # -----------------------------------------------------------------------------
-# 💸 RISIKOKONFIGURATION UND GEBÜHREN
+# 💸 GEBÜHREN
 # -----------------------------------------------------------------------------
 risk:
-  include_fees: false        # true = Ordergröße berücksichtigt Gebühren
-  fee_side: "maker"          # "maker" oder "taker"
-  maker_fee_pct: 0.00014     # Gebührensatz für Maker-Orders
-  taker_fee_pct: 0.00014     # Gebührensatz für Taker-Orders
+  include_fees: false               # true = Ordergröße berücksichtigt Gebühren
+  fee_side: "maker"                 # "maker" oder "taker"
+  maker_fee_pct: 0.00014            # Gebührensatz für Maker-Orders
+  taker_fee_pct: 0.00014            # Gebührensatz für Taker-Orders
+
+# -----------------------------------------------------------------------------
+# 🛡️ HEDGE MANAGEMENT
+# -----------------------------------------------------------------------------
+hedge:
+  enabled: false                    # Deaktiviert per Default
+  mode: direct                      # Optionen: direct | dynamic | reversal
+  trigger_offset: 1.0               # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
+  partial_levels: [0.5, 0.75, 1.0]  # Nur bei dynamic relevant
+  close_on_reentry: true            # Hedge schließen, wenn Preis wieder in Range
+  size_mode: net_position           # Alternativ fixed (z. B. 50 % Hedge)
+  fixed_size_ratio: 0.5             # Nur relevant bei size_mode=fixed
 
 # -----------------------------------------------------------------------------
 # 💰 MARGIN- UND HEBELKONFIGURATION
 # -----------------------------------------------------------------------------
 margin:
-  mode: "ISOLATION"          # "ISOLATION" oder "CROSS"
-  leverage: 3                # Hebel für diese Strategie
-  auto_reduce_only: false    # true = keine neuen Positionen, nur Reduktion
+  mode: "ISOLATION"                 # "ISOLATION" oder "CROSS"
+  leverage: 3                       # Hebel für diese Strategie
+  auto_reduce_only: false           # true = keine neuen Positionen, nur Reduktion
 
 # -----------------------------------------------------------------------------
 # 🧩 STRATEGIEVERHALTEN
 # -----------------------------------------------------------------------------
 strategy:
-  entry_on_touch: true       # true = Order beim Preis-Touch platzieren
+  entry_on_touch: true              # true = Order beim Preis-Touch platzieren

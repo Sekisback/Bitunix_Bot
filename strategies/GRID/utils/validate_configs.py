@@ -97,16 +97,24 @@ def validate_all_configs():
     try:
         with open(base_path, encoding='utf-8') as f:
             base_dict = yaml.safe_load(f)
-        
-        GridBotConfig(**base_dict)
-        table.add_row("base.yaml", "✅ OK", "Alle Pflichtfelder valide")
-        console.print("[green]✓ base.yaml ist valide[/green]")
-        
+
+        cfg = GridBotConfig(**base_dict)
+
+        # === Hedge-Validierung nur wenn Parsing erfolgreich ===
+        hedge_issues = validate_hedge_config(cfg)
+        if hedge_issues:
+            all_valid = False
+            detail = "\n".join(f"❌ {x}" for x in hedge_issues)
+            table.add_row("base.yaml", "⚠ WARNUNG", f"Hedge: {detail}")
+            console.print("[yellow]⚠ Hedge-Parameter prüfen in base.yaml[/yellow]")
+        else:
+            table.add_row("base.yaml", "✅ OK", "Alle Pflichtfelder valide")
+            console.print("[green]✓ base.yaml ist valide[/green]")
+
     except Exception as e:
         all_valid = False
         clean_error = format_validation_error(e)
-        error_text = clean_error
-        table.add_row("base.yaml", "❌ FEHLER", error_text)
+        table.add_row("base.yaml", "❌ FEHLER", clean_error)
         console.print(f"[red]✗ base.yaml hat Fehler[/red]")
     
     # === 2. Coin-Configs ===
@@ -124,24 +132,29 @@ def validate_all_configs():
                 base_dict = yaml.safe_load(f)
             with open(coin_path, encoding='utf-8') as f:
                 coin_dict = yaml.safe_load(f)
-            
+
             merged = merge_configs(base_dict, coin_dict)
             config = GridBotConfig(**merged)
-            
-            table.add_row(
-                coin_path.name,
-                "✅ OK",
-                f"Symbol: {config.symbol}, "
-                f"Grid: {config.grid.grid_levels} levels, "
-                f"Dry: {config.trading.dry_run}"
-            )
-            console.print(f"[green]✓ {coin_path.name} ist valide[/green]")
-            
+
+            # === Hedge-Validierung ===
+            hedge_issues = validate_hedge_config(config)
+            if hedge_issues:
+                all_valid = False
+                detail = "\n".join(f"❌ {x}" for x in hedge_issues)
+                table.add_row(coin_path.name, "⚠ WARNUNG", f"Hedge: {detail}")
+                console.print(f"[yellow]⚠ Hedge-Parameter prüfen in {coin_path.name}[/yellow]")
+            else:
+                table.add_row(
+                    coin_path.name,
+                    "✅ OK",
+                    f"Symbol: {config.symbol}, Grid: {config.grid.grid_levels} levels, Dry: {config.trading.dry_run}"
+                )
+                console.print(f"[green]✓ {coin_path.name} ist valide[/green]")
+
         except Exception as e:
             all_valid = False
             clean_error = format_validation_error(e)
-            error_text = clean_error
-            table.add_row(coin_path.name, "❌ FEHLER", error_text)
+            table.add_row(coin_path.name, "❌ FEHLER", clean_error)
             console.print(f"[red]✗ {coin_path.name} hat Fehler[/red]")
     
     # Ausgabe wie vorher...
@@ -165,7 +178,43 @@ def validate_all_configs():
             border_style="red"
         ))
         return False
-    
+
+def validate_hedge_config(cfg):
+    """Führt logische Prüfungen für den Hedge-Abschnitt durch"""
+    issues = []
+
+    if not cfg.hedge.enabled:
+        return issues  # nichts zu prüfen, Hedge deaktiviert
+
+    # 1️⃣ Mode-abhängige Regeln
+    if cfg.hedge.mode == "dynamic" and not cfg.hedge.partial_levels:
+        issues.append("Bei mode='dynamic' müssen 'partial_levels' gesetzt sein.")
+    if cfg.hedge.mode not in ("direct", "dynamic", "reversal"):
+        issues.append(f"Ungültiger Hedge-Mode: {cfg.hedge.mode}")
+
+    # 2️⃣ Trigger-Offset muss sinnvoll sein
+    if cfg.hedge.trigger_offset <= 0:
+        issues.append("trigger_offset muss > 0 sein (z. B. 1.0).")
+
+    # 3️⃣ Größe / Ratio
+    if cfg.hedge.size_mode == "fixed":
+        if not (0 < cfg.hedge.fixed_size_ratio <= 1):
+            issues.append("Bei size_mode='fixed' muss fixed_size_ratio zwischen 0 und 1 liegen.")
+    elif cfg.hedge.size_mode != "net_position":
+        issues.append(f"Ungültiger size_mode: {cfg.hedge.size_mode}")
+
+    # 4️⃣ partial_levels logisch prüfen
+    if cfg.hedge.mode == "dynamic":
+        invalid = [x for x in cfg.hedge.partial_levels if not (0 < x <= 1)]
+        if invalid:
+            issues.append(f"partial_levels enthalten ungültige Werte: {invalid} (muss 0–1).")
+
+    # 5️⃣ close_on_reentry ist bool – kein Fehler nötig, aber Hinweis
+    if not isinstance(cfg.hedge.close_on_reentry, bool):
+        issues.append("close_on_reentry muss bool sein (true/false).")
+
+    return issues
+
     
 if __name__ == "__main__":
     # Wechsle ins GRID-Verzeichnis

@@ -1,19 +1,24 @@
 # -*- coding: utf-8 -*-
+# strategies/GRID/manager/grid_manager.py (Paket 4b)
+"""
+GridManager mit RiskManager-Integration
+"""
+
 import logging
 import time
 import asyncio
-import hashlib
 from dataclasses import dataclass
 from typing import List, Optional
 from .grid_lifecycle import GridLifecycle, GridState
 from .order_sync import OrderSync
+from .grid_calculator import GridCalculator
+from .risk_manager import RiskManager  # ← NEU
 import sys
 from pathlib import Path
 
 GRID_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(GRID_DIR))
 
-from models.config_models import GridMode, TPMode, SLMode
 from utils.exceptions import (
     InvalidGridConfigError, OrderPlacementError,
     GridInitializationError
@@ -48,10 +53,8 @@ class GridManager:
         self.grid_direction: str = self.trading.grid_direction.value
         self.grid_mode: str = self.grid_direction
         self.levels: List[GridLevel] = []
-        self._price_list: List[float] = []
         self.last_rebalance: float = 0.0
         self._levels_lock = asyncio.Lock()
-        self._grid_config_hash: Optional[str] = None
         self.margin_mode = config.margin.mode
         self.leverage = config.margin.leverage
 
@@ -60,14 +63,19 @@ class GridManager:
         self.logger.setLevel(getattr(logging, level_name, logging.INFO))
         self.lifecycle = GridLifecycle(self.symbol, on_state_change=self._on_state_change)
 
-        raw_dry = self.trading.dry_run
-        self.logger.info(f"[{self.symbol}] ⚙️  Trading-Block geladen")
-        self.logger.debug(f"[{self.symbol}] Dry-Run: {raw_dry!r}")
-
+        # === GridCalculator initialisieren ===
+        self.calculator = GridCalculator(self.grid_conf, self.logger)
+        
+        # === NEU: RiskManager initialisieren ===
+        self.risk_manager = RiskManager(
+            self.grid_conf,
+            self.risk_conf,
+            self.calculator,
+            self.logger
+        )
 
         try:
             self.validate_config()
-            self._build_price_list()
             self._create_grid_levels()
             self.last_rebalance = time.time()
             self.log_summary()
@@ -75,13 +83,20 @@ class GridManager:
             self.lifecycle.set_state(GridState.ACTIVE)
             self.logger.info(f"[{self.symbol}] GridManager aktiv")
 
+            # === NEU: TP/SL via RiskManager ===
+            price_list = self.calculator.calculate_price_list()
             for lvl in self.levels:
-                lvl.tp = self._take_profit_for(lvl.price, lvl.index, lvl.side)
-                lvl.sl = self._stop_loss_for(lvl.price, lvl.side)
+                lvl.tp = self.risk_manager.calculate_take_profit(
+                    lvl.price, lvl.index, lvl.side, price_list
+                )
+                lvl.sl = self.risk_manager.calculate_stop_loss(lvl.price, lvl.side)
 
             self.order_sync = OrderSync(
-                symbol=self.symbol, levels=self.levels, logger=self.logger,
-                client=self.client, size=self._effective_order_size(),
+                symbol=self.symbol, 
+                levels=self.levels, 
+                logger=self.logger,
+                client=self.client, 
+                size=self.risk_manager.calculate_effective_size(),  # ← NEU
                 grid_direction=self.grid_direction,
             )
 
@@ -112,78 +127,34 @@ class GridManager:
                 f"min_price_step ({tick}) muss > 0 sein"
             )
 
-    def _compute_grid_hash(self) -> str:
-        config_str = (
-            f"{self.grid_conf.lower_price}|{self.grid_conf.upper_price}|"
-            f"{self.grid_conf.grid_levels}|{self.grid_conf.grid_mode.value}|"
-            f"{self.grid_conf.min_price_step}"
-        )
-        return hashlib.md5(config_str.encode()).hexdigest()
-
-    def _build_price_list(self) -> None:
-        current_hash = self._compute_grid_hash()
-        if self._grid_config_hash == current_hash and self._price_list:
-            self.logger.debug("Preisraster-Cache hit")
-            return
-        
-        lower = float(self.grid_conf.lower_price)
-        upper = float(self.grid_conf.upper_price)
-        n = int(self.grid_conf.grid_levels)
-
-        if self.grid_conf.grid_mode == GridMode.ARITHMETIC:
-            step = (upper - lower) / n
-            prices = [lower + i * step for i in range(n + 1)]
-        elif self.grid_conf.grid_mode == GridMode.GEOMETRIC:
-            ratio = (upper / lower) ** (1.0 / n)
-            prices = [lower * (ratio ** i) for i in range(n + 1)]
-        else:
-            raise InvalidGridConfigError(f"Unbekannter grid_mode: {self.grid_conf.grid_mode}")
-
-        prices = [self._round_to_tick(p) for p in prices]
-        self._price_list = prices
-        self._grid_config_hash = current_hash
-        self.logger.info(f"Preisraster neu berechnet: {len(prices)} Levels")
-
     def _create_grid_levels(self) -> None:
+        """Erstellt GridLevel-Objekte basierend auf Preisraster"""
+        price_list = self.calculator.calculate_price_list()
+        
         lower = self.grid_conf.lower_price
         upper = self.grid_conf.upper_price
         mid = (lower + upper) / 2.0
+        
         self.levels = []
-        for i, p in enumerate(self._price_list):
+        
+        for i, p in enumerate(price_list):
             if self.grid_direction == "long":
                 side = "BUY"
             elif self.grid_direction == "short":
                 side = "SELL"
             else:
                 side = "BUY" if p <= mid else "SELL"
+            
             self.levels.append(GridLevel(index=i, price=p, side=side))
+        
         self.logger.info(f"{len(self.levels)} GridLevel-Objekte erstellt ({self.grid_direction}).")
-
-    def _round_to_tick(self, price: float) -> float:
-        tick = float(self.grid_conf.min_price_step)
-        return round(round(price / tick) * tick, 12)
-
-    def _effective_order_size(self) -> float:
-        base_size = float(self.grid_conf.base_order_size)
-        if base_size <= 0.0:
-            self.logger.error("base_order_size <= 0")
-            return 0.0
-        if self.risk_conf.include_fees:
-            fee_side = self.risk_conf.fee_side.lower()
-            fee_pct = (self.risk_conf.maker_fee_pct if fee_side == "maker" else self.risk_conf.taker_fee_pct)
-            effective_fee = fee_pct * 2.0
-            size = base_size * (1.0 - effective_fee)
-            self.logger.debug(f"[FeeCalc] base={base_size} → effective={size:.8f}")
-        else:
-            size = base_size
-        return max(0.0, round(size, 8))
 
     def _maybe_rebalance(self) -> None:
         now = time.time()
         interval = int(self.grid_conf.rebalance_interval)
         if now - self.last_rebalance >= interval:
             self.logger.info("Rebalancing...")
-            self._build_price_list()
+            self.calculator.invalidate_cache()
             self._create_grid_levels()
             self.last_rebalance = now
 
@@ -208,59 +179,42 @@ class GridManager:
             self.logger.error(f"Update-Fehler: {e}")
             self.lifecycle.set_state(GridState.ERROR, str(e))
 
-    def _take_profit_for(self, entry_price: float, level_index: int, side: str = "BUY") -> Optional[float]:
-        if self.grid_conf.tp_mode == TPMode.NEXT_GRID:
-            if side.upper() == "BUY":
-                if level_index < len(self._price_list) - 1:
-                    tp = self._price_list[level_index + 1]
-                else:
-                    step = self._price_list[-1] - self._price_list[-2]
-                    tp = entry_price + step
-            else:
-                if level_index > 0:
-                    tp = self._price_list[level_index - 1]
-                else:
-                    step = self._price_list[1] - self._price_list[0]
-                    tp = entry_price - step
-        elif self.grid_conf.tp_mode == TPMode.PERCENT:
-            pct = float(self.grid_conf.take_profit_pct)
-            if side.upper() == "BUY":
-                tp = entry_price * (1.0 + pct)
-            else:
-                tp = entry_price * (1.0 - pct)
-        else:
-            return None
-        return self._round_to_tick(tp)
-
-    def _stop_loss_for(self, entry_price: float, side: str = "BUY") -> Optional[float]:
-        if self.grid_conf.sl_mode == SLMode.NONE:
-            return None
-        elif self.grid_conf.sl_mode == SLMode.FIXED:
-            fixed = self.grid_conf.stop_loss_price
-            return self._round_to_tick(float(fixed)) if fixed is not None else None
-        elif self.grid_conf.sl_mode == SLMode.PERCENT:
-            pct = float(self.grid_conf.stop_loss_pct)
-            sl = entry_price * (1.0 - pct) if side.upper() == "BUY" else entry_price * (1.0 + pct)
-            return self._round_to_tick(sl)
-        else:
-            return None
-
     def _place_entry(self, level: GridLevel) -> None:
-        size = self._effective_order_size()
+        """Order platzieren mit RiskManager"""
+        # === NEU: Ordergröße via RiskManager ===
+        size = self.risk_manager.calculate_effective_size()
+        
         if size <= 0:
             self.logger.warning("Effektive Ordergröße 0")
             return
+        
         tp = level.tp
         sl = level.sl
+        
+        # === NEU: TP/SL validieren ===
+        if not self.risk_manager.validate_tp_sl(level.price, tp, sl, level.side):
+            self.logger.error(f"TP/SL-Validierung fehlgeschlagen @ {level.price}")
+            return
+        
         if self.trading.dry_run:
-            self.logger.info(f"[SIM] {level.side} @ {level.price} | size={size} | TP={tp} | SL={sl}")
+            self.logger.info(
+                f"[SIM] {level.side} @ {level.price} | "
+                f"size={size} | TP={tp} | SL={sl}"
+            )
             level.active, level.tp, level.sl = True, tp, sl
             return
+        
         try:
             order_id = self.client.place_order(
-                symbol=self.symbol, side=level.side, price=level.price, size=size,
-                take_profit=tp, stop_loss=sl, client_id_prefix=self.trading.client_id_prefix,
-                reduce_only=self.config.margin.auto_reduce_only, leverage=self.config.margin.leverage,
+                symbol=self.symbol, 
+                side=level.side, 
+                price=level.price, 
+                size=size,
+                take_profit=tp, 
+                stop_loss=sl, 
+                client_id_prefix=self.trading.client_id_prefix,
+                reduce_only=self.config.margin.auto_reduce_only, 
+                leverage=self.config.margin.leverage,
                 margin_mode=self.config.margin.mode,
             )
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
@@ -314,17 +268,43 @@ class GridManager:
         self.logger.info(f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled}")
 
     def log_summary(self) -> None:
+        """Erweiterte Summary mit Risk-Info"""
         self.logger.info("=" * 60)
-        self.logger.info(f"GRID SUMMARY ({self.symbol}) {'=== DRY-RUN ===' if self.trading.dry_run else '=== REAL MODE ==='}")
+        self.logger.info(
+            f"GRID SUMMARY ({self.symbol}) "
+            f"{'=== DRY-RUN ===' if self.trading.dry_run else '=== REAL MODE ==='}"
+        )
         self.logger.info("=" * 60)
         self.logger.info(f"Direction  : {self.grid_direction.upper()}")
         self.logger.info(f"Margin Mode: {self.margin_mode.upper()}")
         self.logger.info(f"Leverage   : {self.leverage}")
         self.logger.info(f"Mode       : {self.grid_conf.grid_mode.value}")
-        self.logger.info(f"Levels     : {len(self.levels)} ({self.grid_conf.lower_price} → {self.grid_conf.upper_price})")
+        self.logger.info(
+            f"Levels     : {len(self.levels)} "
+            f"({self.grid_conf.lower_price} → {self.grid_conf.upper_price})"
+        )
         self.logger.info(f"Base Size  : {self.grid_conf.base_order_size}")
-        self.logger.info(f"Take Profit: {self.grid_conf.tp_mode.value}")
-        self.logger.info(f"Stop Loss  : {self.grid_conf.sl_mode.value}")
+        
+        # === NEU: Risk-Summary ===
+        try:
+            risk_info = self.risk_manager.get_risk_summary()
+            self.logger.info(f"Take Profit: {risk_info['tp_mode']}")
+            if risk_info.get('tp_pct'):
+                self.logger.info(f"  TP %     : {risk_info['tp_pct']*100:.2f}%")
+            self.logger.info(f"Stop Loss  : {risk_info['sl_mode']}")
+            if risk_info.get('sl_pct'):
+                self.logger.info(f"  SL %     : {risk_info['sl_pct']*100:.2f}%")
+            if risk_info.get('sl_price'):
+                self.logger.info(f"  SL Price : {risk_info['sl_price']}")
+            
+            fee_info = self.risk_manager.get_fee_info()
+            self.logger.info(
+                f"Fees       : {'Included' if fee_info['include_fees'] else 'Ignored'} "
+                f"({fee_info['fee_side']})"
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ Risk-Summary fehlt: {e}")
+        
         self.logger.info("=" * 60)
 
     async def sync_orders(self, dry_run=None):

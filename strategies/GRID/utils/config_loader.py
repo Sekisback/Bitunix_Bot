@@ -110,4 +110,5 @@ def print_config(config: GridBotConfig, title: str = "Geladene Config"):
     print(f"Grid: {config.grid.dict()}")
     print(f"Risk: {config.risk.dict()}")
     print(f"Margin: {config.margin.dict()}")
+    print(f"Hedge: {config.hedge.dict()}")
     print("=" * 60 + "\n")
