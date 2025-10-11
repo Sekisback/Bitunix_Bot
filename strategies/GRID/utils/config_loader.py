@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Dict, Any
 from models.config_models import GridBotConfig
 from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
 from utils.error_format import format_validation_error
 
 console = Console()
@@ -26,91 +28,32 @@ def merge_configs(base: Dict, override: Dict) -> Dict:
 
 
 def load_config(coin_symbol: str) -> GridBotConfig:
-    """
-    Lädt und validiert Config mit Pydantic
-    
-    Args:
-        coin_symbol: Symbol der Coin (z.B. "ONDOUSDT")
-    
-    Returns:
-        Validiertes GridBotConfig-Objekt
-    
-    Raises:
-        FileNotFoundError: Config-Datei fehlt
-        ValueError: Config ungültig
-    """
+    """Lädt base.yaml + Coin-Config, validiert, gibt GridBotConfig zurück"""
+
     config_dir = Path(__file__).parent.parent / "configs"
-
-    # === 1. Base laden und prüfen ===
-    console.print(f"\n[cyan]🔍 Prüfe base.yaml...[/cyan]")
     base_path = config_dir / "base.yaml"
-
-    if not base_path.exists():
-        raise FileNotFoundError(f"Base-Config fehlt: {base_path}")
-
-    with open(base_path, 'r', encoding='utf-8') as f:
-        base_dict = yaml.safe_load(f)
-
-    try:
-        GridBotConfig(**base_dict)
-        console.print("[green]✅ base.yaml ist valide[/green]")
-    except Exception as e:
-        console.print("[red]❌ Fehler in base.yaml:[/red]")
-        console.print(format_validation_error(e))
-        raise ValueError(f"Base-Config ungültig: {e}")
-
-    # === 2. Coin-Config laden ===
-    console.print(f"\n[cyan]🔍 Prüfe {coin_symbol}.yaml...[/cyan]")
     coin_path = config_dir / f"{coin_symbol}.yaml"
 
-    if not coin_path.exists():
-        raise FileNotFoundError(
-            f"Coin-Config fehlt: {coin_path}\n"
-            f"Verfügbare: {list(config_dir.glob('*.yaml'))}"
-        )
+    # === Base laden ===
+    with open(base_path, "r", encoding="utf-8") as f:
+        base_dict = yaml.safe_load(f)
 
-    with open(coin_path, 'r', encoding='utf-8') as f:
+    # === Coin laden ===
+    with open(coin_path, "r", encoding="utf-8") as f:
         coin_dict = yaml.safe_load(f)
 
-    # === 3. Merge und final validieren ===
+    # === Merge und validieren ===
     merged = merge_configs(base_dict, coin_dict)
 
     try:
         config = GridBotConfig(**merged)
-
-        # === Erfolgstabelle ===
-        table = Table(
-            title="Validierungs-Ergebnisse",
-            show_lines=True,
-            header_style="bold cyan",
-            title_style="italic dim",
-        )
-        table.add_column("Config", style="cyan", width=20)
-        table.add_column("Status", style="bold", width=10)
-        table.add_column("Details")
-
-        table.add_row(
-            "base.yaml", "✅ OK", "Alle Pflichtfelder valide"
-        )
-        table.add_row(
-            f"{coin_symbol}.yaml",
-            "✅ OK",
-            f"Symbol: {config.symbol}, Grid: {config.grid.grid_levels} levels, Dry: {config.trading.dry_run}"
-        )
-
-        console.print(table)
-        console.print(Panel.fit("[bold green]✓ Alle Configs sind valide und einsatzbereit![/bold green]",
-                                title="[green]Ergebnis[/green]"))
-
+        # 👉 bei Erfolg keinerlei Ausgabe
         return config
 
     except Exception as e:
-        from rich.table import Table
-        from rich.panel import Panel
-
+        # 🔴 Nur bei Fehlern: schöne tabellarische Ausgabe
         console.print("\n[red]✗ Fehler in den Configs erkannt[/red]")
 
-        # === Tabelle für Fehlerausgabe ===
         table = Table(
             title="Validierungs-Ergebnisse",
             show_lines=True,
@@ -131,11 +74,11 @@ def load_config(coin_symbol: str) -> GridBotConfig:
         console.print(
             Panel(
                 "[bold red]✗ Es gibt Fehler in den Configs![/bold red]\n\n"
-                "Siehe Tabelle oben für Details. Korrigiere die Fehler und führe den Validator erneut aus.",
-                title="[red]Ergebnis[/red]"
+                "Siehe Tabelle oben für Details. "
+                "Korrigiere die Fehler und führe den Validator erneut aus.",
+                title="[red]Ergebnis[/red]",
             )
         )
-
         import sys
         sys.exit(1)
 
