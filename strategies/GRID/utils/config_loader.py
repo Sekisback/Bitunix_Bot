@@ -77,20 +77,67 @@ def load_config(coin_symbol: str) -> GridBotConfig:
 
     try:
         config = GridBotConfig(**merged)
-        console.print(f"[green]✅ {coin_symbol}.yaml + base.yaml = valide[/green]")
-        console.print(f"   📊 Symbol: {config.symbol}")
-        console.print(f"   📈 Grid: {config.grid.lower_price} → {config.grid.upper_price}")
-        console.print(f"   🎚️ Levels: {config.grid.grid_levels}")
-        console.print(f"   🧪 Dry-Run: {config.trading.dry_run}")
+
+        # === Erfolgstabelle ===
+        table = Table(
+            title="Validierungs-Ergebnisse",
+            show_lines=True,
+            header_style="bold cyan",
+            title_style="italic dim",
+        )
+        table.add_column("Config", style="cyan", width=20)
+        table.add_column("Status", style="bold", width=10)
+        table.add_column("Details")
+
+        table.add_row(
+            "base.yaml", "✅ OK", "Alle Pflichtfelder valide"
+        )
+        table.add_row(
+            f"{coin_symbol}.yaml",
+            "✅ OK",
+            f"Symbol: {config.symbol}, Grid: {config.grid.grid_levels} levels, Dry: {config.trading.dry_run}"
+        )
+
+        console.print(table)
+        console.print(Panel.fit("[bold green]✓ Alle Configs sind valide und einsatzbereit![/bold green]",
+                                title="[green]Ergebnis[/green]"))
+
         return config
 
     except Exception as e:
-        console.print(f"[red]❌ Fehler nach Merge von {coin_symbol}.yaml:[/red]")
-        console.print(format_validation_error(e))
-        # 🚫 Kein weiterer Raise → verhindert hässlichen Traceback
+        from rich.table import Table
+        from rich.panel import Panel
+
+        console.print("\n[red]✗ Fehler in den Configs erkannt[/red]")
+
+        # === Tabelle für Fehlerausgabe ===
+        table = Table(
+            title="Validierungs-Ergebnisse",
+            show_lines=True,
+            expand=True,
+            header_style="bold cyan",
+            title_style="italic dim",
+        )
+        table.add_column("Config", style="cyan", width=20)
+        table.add_column("Status", style="bold", width=10)
+        table.add_column("Details", overflow="fold")
+
+        clean_error = format_validation_error(e)
+
+        table.add_row("base.yaml", "✅ OK", "Alle Pflichtfelder valide")
+        table.add_row(f"{coin_symbol}.yaml", "❌ FEHLER", clean_error)
+
+        console.print(table)
+        console.print(
+            Panel(
+                "[bold red]✗ Es gibt Fehler in den Configs![/bold red]\n\n"
+                "Siehe Tabelle oben für Details. Korrigiere die Fehler und führe den Validator erneut aus.",
+                title="[red]Ergebnis[/red]"
+            )
+        )
+
         import sys
         sys.exit(1)
-
 
 
 def print_config(config: GridBotConfig, title: str = "Geladene Config"):
