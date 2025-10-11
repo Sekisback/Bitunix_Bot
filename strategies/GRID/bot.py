@@ -223,11 +223,9 @@ async def main():
         logger.error(f"❌ Grid-Init fehlgeschlagen: {e}")
         sys.exit(1)
 
-    try:
-        bot.grid.setup_margin()
-    except Exception as e:
-        logger.warning(f"[{config.symbol}] ⚠️ Margin-Setup fehlgeschlagen: {e}")
-
+    # Margin Mode & Leverage Setup
+    bot.grid.setup_margin()
+    
     if args.sync:
         print("\n🔍 OrderSync-DryRun...")
         try:

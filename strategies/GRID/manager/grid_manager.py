@@ -342,5 +342,10 @@ class GridManager:
         self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
 
     def setup_margin(self):
-        self.client.change_margin_mode(symbol=self.symbol, margin_mode=self.margin_mode.upper())
-        self.client.change_leverage(symbol=self.symbol, leverage=self.leverage)
+        if self.trading.dry_run:
+            return
+        try:
+            self.client.change_margin_mode(symbol=self.symbol, margin_mode=self.margin_mode.upper())
+            self.client.change_leverage(symbol=self.symbol, leverage=self.leverage)
+        except Exception as e:
+            self.logger.warning(f"[{self.symbol}] ⚠️ Margin-Setup fehlgeschlagen: {e}")
