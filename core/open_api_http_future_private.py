@@ -1,12 +1,17 @@
 import json
 from typing import Dict, Optional, Any, List
 import requests
+import sys
+from pathlib import Path
 from core.config import Config
 from core.error_codes import ErrorCode
 from core.open_api_http_sign import get_auth_headers, sort_params
 import logging
 import time
 import uuid
+
+# HTTP Timeout als Konstante (core-spezifisch)
+HTTP_TIMEOUT_SECONDS = 30
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
 
@@ -22,7 +27,7 @@ class OpenApiHttpFuturePrivate:
             "language": "en-US",
             "Content-Type": "application/json"
         })
-        self.timeout = 30  # Global timeout
+        self.timeout = HTTP_TIMEOUT_SECONDS
 
     def _handle_response(self, response: requests.Response) -> Dict[str, Any]:
         if response.status_code != 200:

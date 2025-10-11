@@ -2,6 +2,13 @@
 import time
 import logging
 import asyncio
+import sys
+from pathlib import Path
+
+GRID_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(GRID_DIR))
+from utils.constants import PRICE_TOLERANCE
+
 
 class OrderSync:
     """Synchronisiert erwartete Grid-Orders mit echten Orders am Exchange"""
@@ -14,8 +21,6 @@ class OrderSync:
         self.size = size or 0.0
         self.grid_direction = grid_direction
         self.fetch_orders_callback = None
-        
-        # Race Condition Fix: Lock für Order-Zugriffe
         self._sync_lock = asyncio.Lock()
 
     async def fetch_exchange_orders(self):
@@ -29,15 +34,35 @@ class OrderSync:
         return []
 
     def match_orders(self, exchange_orders):
-        """Vergleicht aktuelle Exchange-Orders mit erwarteten Grid-Levels"""
+        """
+        Vergleicht Exchange-Orders mit Grid-Levels
+        Performance: O(n) statt O(n²) durch Dict-Lookup
+        """
         matched, missing, obsolete = [], [], []
         
+        # Performance-Optimierung: Dict mit Preis als Key
+        order_dict = {}
+        for o in exchange_orders:
+            price = float(o.get("price", 0))
+            # Runde auf Grid-Genauigkeit
+            rounded_price = round(price, 8)
+            order_dict[rounded_price] = o
+        
+        # Prüfe alle Grid-Levels
         for lvl in self.levels:
             if not lvl.active and not lvl.filled:
-                matched_order = next(
-                    (o for o in exchange_orders if abs(float(o.get("price", 0)) - lvl.price) < 1e-8),
-                    None,
-                )
+                rounded_level_price = round(lvl.price, 8)
+                
+                # O(1) Lookup statt O(n) nested loop
+                matched_order = order_dict.get(rounded_level_price)
+                
+                # Fallback: Toleranz-Check bei Float-Ungenauigkeit
+                if not matched_order:
+                    for price, order in order_dict.items():
+                        if abs(price - rounded_level_price) < PRICE_TOLERANCE:
+                            matched_order = order
+                            break
+                
                 if matched_order:
                     lvl.order_id = matched_order.get("orderId")
                     lvl.active = True
@@ -45,18 +70,20 @@ class OrderSync:
                 else:
                     missing.append(lvl)
         
-        level_prices = [l.price for l in self.levels]
+        # Finde obsolete Orders (nicht in Grid)
+        level_prices = {round(l.price, 8) for l in self.levels}
         for o in exchange_orders:
-            if float(o.get("price", 0)) not in level_prices:
-                obsolete.append(o)
+            price = round(float(o.get("price", 0)), 8)
+            if price not in level_prices:
+                # Doppelcheck mit Toleranz
+                is_in_grid = any(abs(price - lp) < PRICE_TOLERANCE for lp in level_prices)
+                if not is_in_grid:
+                    obsolete.append(o)
         
         return matched, missing, obsolete
 
     async def sync_orders(self, dry_run: bool = True):
-        """
-        Führt Synchronisation durch (mit Race Condition Fix)
-        """
-        # Race Condition Fix: Lock verwenden
+        """Führt Synchronisation durch (mit Race Condition Fix)"""
         async with self._sync_lock:
             exchange_orders = await self.fetch_exchange_orders()
             matched, missing, obsolete = self.match_orders(exchange_orders)

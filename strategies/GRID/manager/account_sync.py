@@ -1,6 +1,12 @@
 import logging
 import time
+import sys
+from pathlib import Path
 from typing import Dict, Any
+
+GRID_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(GRID_DIR))
+from utils.constants import BALANCE_SYNC_INTERVAL
 
 
 class AccountSync:
@@ -25,13 +31,10 @@ class AccountSync:
         self.positions: Dict[str, Dict[str, Any]] = {}
 
         # Flags
-        self.ws_connected = False  # wird True, sobald erstes WS-Event empfangen wird
+        self.ws_connected = False
 
-    # -------------------------------------------------------------------------
-    # Balance Handling
-    # -------------------------------------------------------------------------
     def _update_balance_http(self):
-        """Fallback: Balance über HTTP abrufen."""
+        """Fallback: Balance über HTTP abrufen"""
         try:
             res = self.client.get_account()
             if isinstance(res, list):
@@ -39,6 +42,7 @@ class AccountSync:
 
             self.balance = float(res.get("available", 0.0))
             self.balance_coin = res.get("marginCoin", "USDT")
+            self.last_sync = time.time()
             self.logger.info(
                 f"[{self.symbol}] 💰 HTTP Balance: {self.balance:.2f} {self.balance_coin}"
             )
@@ -46,7 +50,7 @@ class AccountSync:
             self.logger.error(f"Fehler beim HTTP-Balance-Abruf: {e}")
 
     def _update_balance_ws(self, data: Dict[str, Any]):
-        """Balance-Update über WebSocket-Event."""
+        """Balance-Update über WebSocket-Event"""
         try:
             bal = float(data.get("available", 0))
             coin = data.get("coin", self.balance_coin)
@@ -57,11 +61,8 @@ class AccountSync:
         except Exception as e:
             self.logger.error(f"Fehler beim WS-Balance-Update: {e}")
 
-    # -------------------------------------------------------------------------
-    # Order Handling
-    # -------------------------------------------------------------------------
     def _update_order_ws(self, data: Dict[str, Any]):
-        """Order-Update über WebSocket."""
+        """Order-Update über WebSocket"""
         try:
             order_id = data.get("orderId") or data.get("id")
             status = (
@@ -92,11 +93,8 @@ class AccountSync:
         except Exception as e:
             self.logger.error(f"Fehler beim Order-Update: {e}")
 
-    # -------------------------------------------------------------------------
-    # Position Handling
-    # -------------------------------------------------------------------------
     def _update_position_ws(self, data: Dict[str, Any]):
-        """Positions-Update über WebSocket."""
+        """Positions-Update über WebSocket"""
         try:
             pos_id = data.get("positionId") or data.get("symbol")
             self.positions[pos_id] = data
@@ -110,11 +108,8 @@ class AccountSync:
         except Exception as e:
             self.logger.error(f"Fehler beim Position-Update: {e}")
 
-    # -------------------------------------------------------------------------
-    # WebSocket Dispatcher
-    # -------------------------------------------------------------------------
     async def on_ws_event(self, channel: str, data: Dict[str, Any]):
-        """Dispatcher für WS-Events."""
+        """Dispatcher für WS-Events"""
         if channel == "balance":
             self._update_balance_ws(data.get("data", {}))
         elif channel == "order":
@@ -124,53 +119,49 @@ class AccountSync:
         else:
             self.logger.debug(f"[{self.symbol}] Unbekannter WS-Kanal: {channel}")
 
-    # -------------------------------------------------------------------------
-    # Öffentliche Sync-Funktion
-    # -------------------------------------------------------------------------
     def sync(self, ws_enabled: bool = True):
         """
-        Periodischer Abgleich.
-        Wenn WS aktiv → Balance aus WS nutzen.
-        Wenn kein WS → Fallback via HTTP.
+        Periodischer Abgleich mit Balance-Doppelabfrage-Fix
+        
+        Wenn WS aktiv UND verbunden → Balance aus WS nutzen
+        Wenn kein WS → Fallback via HTTP (max. alle BALANCE_SYNC_INTERVAL Sekunden)
         """
+        # Wenn WS aktiv und verbunden, nutze WS-Balance
         if ws_enabled and self.ws_connected:
             self.logger.debug(
                 f"[{self.symbol}] Echtzeit-Balance aktiv: {self.balance:.2f} {self.balance_coin}"
             )
             return self.balance
 
-        # Fallback: HTTP-Abfrage max. alle 60s
-        if time.time() - self.last_sync > 60:
-            self.last_sync = time.time()
+        # Fallback: HTTP nur wenn WS NICHT verbunden UND genug Zeit vergangen
+        now = time.time()
+        if not self.ws_connected and (now - self.last_sync >= BALANCE_SYNC_INTERVAL):
+            self.logger.debug(f"[{self.symbol}] WS nicht verbunden → HTTP-Balance-Abfrage")
             self._update_balance_http()
+        
         return self.balance
 
-    # -------------------------------------------------------------------------
-    # HTTP-Preload (Pending Orders)
-    # -------------------------------------------------------------------------
     def preload_pending_orders(self):
         """
-        Lädt alle offenen (Pending) Orders über die HTTP-API.
-        Wird beim Start einmalig aufgerufen, um den WS-Cache zu initialisieren.
+        Lädt alle offenen (Pending) Orders über die HTTP-API
+        Wird beim Start einmalig aufgerufen, um den WS-Cache zu initialisieren
         """
         try:
             if not hasattr(self.client, "get_pending_orders"):
                 self.logger.warning(f"[{self.symbol}] ⚠️ Client unterstützt get_pending_orders() nicht.")
                 return
 
-            # Bitunix liefert direkt ein Dict mit 'orderList' und 'total'
             res = self.client.get_pending_orders(symbol=self.symbol)
 
             if not res:
                 self.logger.info(f"[{self.symbol}] Keine Pending Orders gefunden (leere Antwort).")
                 return
 
-            # 🧩 Korrekte Struktur: {"total": "...", "orderList": [ ... ]}
             order_list = []
             if isinstance(res, dict):
                 order_list = res.get("orderList", [])
             elif isinstance(res, list):
-                order_list = res  # falls irgendwann direkt eine Liste zurückkommt
+                order_list = res
 
             if not order_list:
                 self.logger.info(f"[{self.symbol}] Keine Pending Orders vorhanden.")
