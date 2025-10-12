@@ -208,15 +208,15 @@ class HedgeManager:
         
         # === Logging ===
         price_info = f"@ {hedge_price:.6f}" if hedge_price else "@ MARKET"
-        self.logger.info(
-            f"[HEDGE] 🛡️ Präventiv: Net={net_position_size:.2f} → "
-            f"{hedge_side} {hedge_qty:.2f} {self.symbol} {price_info}"
-        )
+        # self.logger.info(
+        #     f"[HEDGE] 🛡️  Präventiv: Net={net_position_size:.2f} → "
+        #     f"{hedge_side} {hedge_qty:.2f} {self.symbol} {price_info}"
+        # )
         
         # === Dry-Run ===
         if dry_run:
             self.logger.info(
-                f"[HEDGE] (Dry-Run) Würde {hedge_side} {hedge_qty:.2f} {price_info} platzieren"
+                f"[HEDGE] Würde {hedge_side} {hedge_qty:.2f} {price_info} platzieren"
             )
             self.active = True
             return

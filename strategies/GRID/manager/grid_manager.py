@@ -156,7 +156,7 @@ class GridManager:
                 self.logger.error(f"❌ Initial Order @ {lvl.price} fehlgeschlagen: {e}")
         
         mode = "Dry-Run" if self.trading.dry_run else "Real"
-        self.logger.info(f"✅ {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
+        self.logger.info(f"[ORDER] {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
         
         # === Hedge mit Grid-Bounds aktualisieren ===
         self._update_net_position()
@@ -279,7 +279,7 @@ class GridManager:
             return
 
         if self.trading.dry_run:
-            self.logger.info(f"[SIM] {level.side} @ {level.price} | size={size} | TP={tp} | SL={sl}")
+            self.logger.info(f"[ORDER] {level.side} @ {level.price:.4f} | size={size} | TP={tp:.4f} | SL={f'{sl:.4f}' if isinstance(sl, float) else sl}")
             level.active, level.tp, level.sl = True, tp, sl
             return
 
@@ -299,7 +299,7 @@ class GridManager:
             )
 
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
-            self.logger.info(f"{level.side} Order @ {level.price} → ID={order_id}")
+            self.logger.info(f"[{self.symbol}] {level.side} Order @ {level.price:.4f} → ID={order_id}")
 
         except Exception as e:
             raise OrderPlacementError(f"Order @ {level.price} fehlgeschlagen: {e}")
@@ -315,7 +315,7 @@ class GridManager:
         
         # === Debug-Log ===
         self.logger.info(
-            f"[HEDGE] 📊 Aktive Orders: Long={long_pos} Short={short_pos} "
+            f"[HEDGE] Aktive Orders: Long={long_pos} Short={short_pos} "
             f"→ Net={self.net_position_size:.2f}"
         )
 
@@ -370,7 +370,7 @@ class GridManager:
         self.logger.info("=" * 60)
         self.logger.info(
             f"GRID SUMMARY ({self.symbol}) "
-            f"{'=== DRY-RUN ===' if self.trading.dry_run else '=== REAL MODE ==='}"
+            f"{'🛡️  === DRY-RUN === 🛡️' if self.trading.dry_run else '⚠️ === REAL MODE === ⚠️'}"
         )
         self.logger.info("=" * 60)
         self.logger.info(f"Direction  : {self.grid_direction.upper()}")
@@ -388,12 +388,12 @@ class GridManager:
             risk_info = self.risk_manager.get_risk_summary()
             self.logger.info(f"Take Profit: {risk_info['tp_mode']}")
             if risk_info.get('tp_pct'):
-                self.logger.info(f"  TP %     : {risk_info['tp_pct']*100:.2f}%")
+                self.logger.info(f"TP %       : {risk_info['tp_pct']*100:.2f}%")
             self.logger.info(f"Stop Loss  : {risk_info['sl_mode']}")
             if risk_info.get('sl_pct'):
-                self.logger.info(f"  SL %     : {risk_info['sl_pct']*100:.2f}%")
+                self.logger.info(f"SL %       : {risk_info['sl_pct']*100:.2f}%")
             if risk_info.get('sl_price'):
-                self.logger.info(f"  SL Price : {risk_info['sl_price']}")
+                self.logger.info(f"SL Price   : {risk_info['sl_price']}")
             
             fee_info = self.risk_manager.get_fee_info()
             self.logger.info(
