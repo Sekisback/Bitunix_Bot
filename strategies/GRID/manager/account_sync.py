@@ -24,6 +24,7 @@ class AccountSync:
         self.orders: Dict[str, Dict[str, Any]] = {}
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.ws_connected = False
+        self.grid_manager = None 
 
     def _update_balance_http(self):
         """Fallback: Balance über HTTP abrufen"""
@@ -64,10 +65,20 @@ class AccountSync:
 
             if status in ("open", "new", "working"):
                 self.logger.info(f"🟢 Order: {side} {qty}@{price}")
+            
             elif status in ("filled", "partially_filled"):
                 self.logger.info(f"✅ Filled: {side} {qty}@{price}")
+                
+                # === NEU: Hedge bei Fill aktualisieren ===
+                if self.grid_manager:
+                    self._handle_order_fill(order_id, data)
+            
             elif status in ("cancelled", "rejected"):
                 self.logger.warning(f"⚠️ Cancelled: {side} {qty}@{price}")
+                
+                # === NEU: Hedge bei Cancel aktualisieren ===
+                if self.grid_manager:
+                    self._handle_order_cancel(order_id, data)
 
         except Exception as e:
             self.logger.error(f"Order update error: {e}")
@@ -84,6 +95,92 @@ class AccountSync:
             self.logger.info(f"📈 Position: {side} {qty} @ {entry}")
         except Exception as e:
             self.logger.error(f"Position update error: {e}")
+
+    def _handle_order_fill(self, order_id: str, order_data: Dict[str, Any]):
+        """
+        Behandelt gefüllte Grid-Orders und aktualisiert Hedge.
+        
+        Args:
+            order_id: Order-ID der gefüllten Order
+            order_data: Order-Details vom WebSocket
+        """
+        try:
+            price = float(order_data.get("price", 0))
+            
+            # Finde entsprechendes Grid-Level
+            matched_level = None
+            for lvl in self.grid_manager.levels:
+                if abs(lvl.price - price) < 0.0001:  # Toleranz
+                    matched_level = lvl
+                    break
+            
+            if not matched_level:
+                self.logger.warning(f"⚠️ Kein Grid-Level für gefüllte Order @ {price}")
+                return
+            
+            # Level als gefüllt markieren
+            matched_level.filled = True
+            matched_level.active = False
+            
+            self.logger.info(
+                f"🎯 Grid-Level #{matched_level.index} gefüllt @ {price} "
+                f"({matched_level.side})"
+            )
+            
+            # Hedge mit Grid-Bounds aktualisieren
+            self.grid_manager._update_net_position()
+            price_list = self.grid_manager.calculator.calculate_price_list()
+            lower_bound = price_list[0]
+            upper_bound = price_list[-1]
+            step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+
+            self.grid_manager.hedge_manager.update_preemptive_hedge(
+                net_position_size=self.grid_manager.net_position_size,
+                dry_run=self.grid_manager.trading.dry_run,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+                step=step
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ Fill-Handler Fehler: {e}")
+
+    def _handle_order_cancel(self, order_id: str, order_data: Dict[str, Any]):
+        """
+        Behandelt gecancelte Grid-Orders und aktualisiert Hedge.
+        
+        Args:
+            order_id: Order-ID der gecancelten Order
+            order_data: Order-Details vom WebSocket
+        """
+        try:
+            price = float(order_data.get("price", 0))
+            
+            # Finde entsprechendes Grid-Level
+            matched_level = None
+            for lvl in self.grid_manager.levels:
+                if abs(lvl.price - price) < 0.0001:
+                    matched_level = lvl
+                    break
+            
+            if not matched_level:
+                return
+            
+            # Level als inaktiv markieren
+            matched_level.active = False
+            matched_level.order_id = None
+            
+            self.logger.info(f"🔴 Grid-Level #{matched_level.index} cancelled @ {price}")
+            
+            # Hedge aktualisieren
+            self.grid_manager._update_net_position()
+            self.grid_manager.hedge_manager.update_preemptive_hedge(
+                net_position_size=self.grid_manager.net_position_size,
+                dry_run=self.grid_manager.trading.dry_run
+            )
+            
+        except Exception as e:
+            self.logger.error(f"❌ Cancel-Handler Fehler: {e}")
 
     async def on_ws_event(self, channel: str, data: Dict[str, Any]):
         """Dispatcher für WS-Events"""

@@ -12,16 +12,16 @@ symbol: "ONDOUSDT"                  # Platzhalter, wird in Coin-Config überschr
 # ⚙️ TRADING-GRUNDEINSTELLUNGEN
 # -----------------------------------------------------------------------------
 trading:
-  dry_run: true                     # true = Simulation ohne echte Orders
-  grid_direction: "short"           # "long", "short" oder "both" – Handelsrichtung
+  dry_run: false                     # true = Simulation ohne echte Orders
+  grid_direction: "long"           # "long", "short" oder "both" – Handelsrichtung
   client_id_prefix: "GRID"          # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
 
 # -----------------------------------------------------------------------------
 # 📊 GRID-PARAMETER
 # -----------------------------------------------------------------------------
 grid:
-  upper_price: 1.1                  # Obere Preisgrenze des Grids (Coin-spezifisch)
-  lower_price: 1.0                  # Untere Preisgrenze des Grids (Coin-spezifisch)
+  upper_price: 0.70                  # Obere Preisgrenze des Grids (Coin-spezifisch)
+  lower_price: 0.60                  # Untere Preisgrenze des Grids (Coin-spezifisch)
   grid_levels: 2                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
 
   base_order_size: 20               # Grund-Ordergröße (Coin-spezifisch)
@@ -43,9 +43,10 @@ risk:
 # 🛡️ HEDGE MANAGEMENT
 # -----------------------------------------------------------------------------
 hedge:
-  enabled: true                    # Deaktiviert per Default
+  enabled: true                     # Deaktiviert per Default
+  preemptive_hedge: true            # Präventiver Hedge bei offenen Grid-Orders
   mode: direct                      # Optionen: direct | dynamic | reversal
-  trigger_offset: 0               # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
+  trigger_offset: 1                 # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
   partial_levels: [0.5, 0.75, 1.0]  # Nur bei dynamic relevant
   close_on_reentry: true            # Hedge schließen, wenn Preis wieder in Range
   size_mode: net_position           # Alternativ fixed (z. B. 50 % Hedge)

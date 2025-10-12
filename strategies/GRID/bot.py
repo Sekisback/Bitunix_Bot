@@ -53,8 +53,9 @@ class GridBot:
         self.update_interval = config.system.update_interval
         self._stop = False
 
-        self.exchange = client_pri if not self.dry_run else client_pub
-        self.grid = GridManager(self.exchange, config)
+        # self.exchange = client_pri if not self.dry_run else client_pub
+        # self.grid = GridManager(self.exchange, config)
+        self.grid = GridManager(client_pri, config)
 
         self.api_config = Config()
 
@@ -182,10 +183,25 @@ class GridBot:
                 f"🔍 Auto-Sync: MATCHED={result['matched']} | "
                 f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
             )
+            
+            # === Hedge nach Sync aktualisieren (falls Orders nachträglich platziert wurden) ===
+            if result['placed'] > 0:
+                self.grid._update_net_position()
+                price_list = self.grid.calculator.calculate_price_list()
+                lower_bound = price_list[0]
+                upper_bound = price_list[-1]
+                step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+                
+                self.grid.hedge_manager.update_preemptive_hedge(
+                    net_position_size=self.grid.net_position_size,
+                    dry_run=self.grid.trading.dry_run,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    step=step
+                )
+            
         except OrderSyncError as e:
             logger.error(f"OrderSync error: {e}")
-        except Exception as e:
-            logger.exception(f"Auto-Sync error: {e}")
 
 
 async def main():

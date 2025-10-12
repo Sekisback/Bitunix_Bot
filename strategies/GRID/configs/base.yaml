@@ -72,14 +72,14 @@ risk:
 # 🛡️ HEDGE MANAGEMENT
 # -----------------------------------------------------------------------------
 hedge:
-  enabled: false                    # Deaktiviert per Default
+  enabled: true                     # Deaktiviert per Default
+  preemptive_hedge: true            # Präventiver Hedge bei offenen Grid-Orders
   mode: direct                      # Optionen: direct | dynamic | reversal
-  trigger_offset: 1.0               # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
+  trigger_offset: 1                 # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
   partial_levels: [0.5, 0.75, 1.0]  # Nur bei dynamic relevant
   close_on_reentry: true            # Hedge schließen, wenn Preis wieder in Range
   size_mode: net_position           # Alternativ fixed (z. B. 50 % Hedge)
   fixed_size_ratio: 0.5             # Nur relevant bei size_mode=fixed
-
 # -----------------------------------------------------------------------------
 # 💰 MARGIN- UND HEBELKONFIGURATION
 # -----------------------------------------------------------------------------

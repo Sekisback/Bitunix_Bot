@@ -101,25 +101,14 @@ class MarginConfig(BaseModel):
     auto_reduce_only: bool = False
 
 class HedgeConfig(BaseModel):
-    enabled: bool = Field(default=False, description="Aktiviert das Hedge-Management")
-    mode: Literal["direct", "dynamic", "reversal"] = "direct"
-    trigger_offset: float = Field(default=1.0, ge=0.0, description="Multiplikator auf grid_step für Hedge-Trigger")
-    partial_levels: List[float] = Field(
-        default_factory=lambda: [0.5, 0.75, 1.0],
-        description="Prozentuale Hedge-Stufen (nur für dynamic mode)"
-    )
-    close_on_reentry: bool = Field(default=True, description="Hedge schließen, wenn Preis wieder in Grid-Range")
-    size_mode: Literal["net_position", "fixed"] = "net_position"
-    fixed_size_ratio: float = Field(default=1.0, ge=0.0, le=1.0, description="Hedgegröße relativ zur Position, falls fixed")
-
-    @model_validator(mode="after")
-    def validate_hedge_logic(self):
-        """Validiert Hedge-abhängige Einstellungen"""
-        if self.mode == "dynamic" and not self.partial_levels:
-            raise ValueError("Dynamic Hedge benötigt mindestens eine partial_level-Angabe")
-        if self.size_mode == "fixed" and self.fixed_size_ratio <= 0:
-            raise ValueError("Bei size_mode='fixed' muss fixed_size_ratio > 0 sein")
-        return self
+    enabled: bool = False
+    preemptive_hedge: bool = False  # ← NEU
+    mode: str = "direct"
+    trigger_offset: float = 1.0
+    partial_levels: List[float] = [0.5, 0.75, 1.0]
+    close_on_reentry: bool = True
+    size_mode: str = "net_position"
+    fixed_size_ratio: float = 0.5
 
 class StrategyConfig(BaseModel):
     entry_on_touch: bool = True

@@ -12,7 +12,8 @@ from typing import List, Optional
 from .grid_lifecycle import GridLifecycle, GridState
 from .order_sync import OrderSync
 from .grid_calculator import GridCalculator
-from .risk_manager import RiskManager  # ← NEU
+from .risk_manager import RiskManager  
+from .hedge_manager import HedgeManager
 import sys
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from utils.exceptions import (
     InvalidGridConfigError, OrderPlacementError,
     GridInitializationError
 )
+from models.config_models import GridDirection 
 
 @dataclass
 class GridLevel:
@@ -42,7 +44,8 @@ class GridLevel:
 
 class GridManager:
     def __init__(self, client, config):
-        self.client = client
+        """Initialisiert den GridManager inklusive HedgeManager"""
+        self.client = client                     # immer private client
         self.config = config
         self.symbol: str = config.symbol
         self.trading = config.trading
@@ -50,29 +53,51 @@ class GridManager:
         self.risk_conf = config.risk
         self.strategy = config.strategy
         self.system = config.system
-        self.grid_direction: str = self.trading.grid_direction.value
+
+        # === Grid Direction (Enum oder String) ===
+        raw_dir = self.trading.grid_direction
+        try:
+            from models.config_models import GridDirection
+        except ImportError:
+            GridDirection = None
+
+        if GridDirection and isinstance(raw_dir, GridDirection):
+            self.grid_direction = raw_dir.value.lower()  # Enum → String ("long", "short", "both")
+        else:
+            self.grid_direction = str(raw_dir).strip().lower()
+
         self.grid_mode: str = self.grid_direction
-        self.levels: List[GridLevel] = []
+        self.levels: list = []
         self.last_rebalance: float = 0.0
         self._levels_lock = asyncio.Lock()
         self.margin_mode = config.margin.mode
         self.leverage = config.margin.leverage
 
+        # === Logging ===
         self.logger = logging.getLogger("GridManager")
         level_name = self.system.log_level.upper()
         self.logger.setLevel(getattr(logging, level_name, logging.INFO))
+
+        # === Lifecycle ===
         self.lifecycle = GridLifecycle(self.symbol, on_state_change=self._on_state_change)
 
-        # === GridCalculator initialisieren ===
+        # === GridCalculator ===
         self.calculator = GridCalculator(self.grid_conf, self.logger)
-        
-        # === NEU: RiskManager initialisieren ===
-        self.risk_manager = RiskManager(
-            self.grid_conf,
-            self.risk_conf,
-            self.calculator,
-            self.logger
-        )
+
+        # === RiskManager ===
+        self.risk_manager = RiskManager(self.grid_conf, self.risk_conf, self.calculator, self.logger)
+
+        # === HedgeManager ===
+        # immer den privaten client weiterreichen
+        from .hedge_manager import HedgeManager
+        self.hedge_manager = HedgeManager(config.hedge, self.client, self.symbol, self.logger, dry_run=self.trading.dry_run)
+        self.hedge_manager.grid_direction = self.grid_direction
+
+        # Dry-Run-Status an Hedge übergeben
+        try:
+            self.hedge_manager.config.dry_run = bool(self.trading.dry_run)
+        except Exception:
+            pass
 
         try:
             self.validate_config()
@@ -83,22 +108,22 @@ class GridManager:
             self.lifecycle.set_state(GridState.ACTIVE)
             self.logger.info(f"[{self.symbol}] GridManager aktiv")
 
-            # === NEU: TP/SL via RiskManager ===
             price_list = self.calculator.calculate_price_list()
             for lvl in self.levels:
-                lvl.tp = self.risk_manager.calculate_take_profit(
-                    lvl.price, lvl.index, lvl.side, price_list
-                )
+                lvl.tp = self.risk_manager.calculate_take_profit(lvl.price, lvl.index, lvl.side, price_list)
                 lvl.sl = self.risk_manager.calculate_stop_loss(lvl.price, lvl.side)
 
             self.order_sync = OrderSync(
-                symbol=self.symbol, 
-                levels=self.levels, 
+                symbol=self.symbol,
+                levels=self.levels,
                 logger=self.logger,
-                client=self.client, 
-                size=self.risk_manager.calculate_effective_size(),  # ← NEU
+                client=self.client,
+                size=self.risk_manager.calculate_effective_size(),
                 grid_direction=self.grid_direction,
             )
+
+            # ========== Initiale Grid-Orders platzieren ==========
+            self._place_initial_grid_orders()
 
         except (InvalidGridConfigError, GridInitializationError) as e:
             self.lifecycle.set_state(GridState.ERROR, message=str(e))
@@ -106,6 +131,47 @@ class GridManager:
         except Exception as e:
             self.lifecycle.set_state(GridState.ERROR, message=f"Init-Fehler: {e}")
             raise GridInitializationError(f"Grid-Initialisierung fehlgeschlagen: {e}")
+
+
+    def _place_initial_grid_orders(self) -> None:
+        """Platziert alle Grid-Orders initial (Real oder Dry-Run)"""
+        allow_long = self.grid_direction in ("long", "both")
+        allow_short = self.grid_direction in ("short", "both")
+        
+        placed_count = 0
+        
+        for lvl in self.levels:
+            if lvl.active or lvl.filled:
+                continue
+            
+            if lvl.side == "BUY" and not allow_long:
+                continue
+            if lvl.side == "SELL" and not allow_short:
+                continue
+            
+            try:
+                self._place_entry(lvl)
+                placed_count += 1
+            except Exception as e:
+                self.logger.error(f"❌ Initial Order @ {lvl.price} fehlgeschlagen: {e}")
+        
+        mode = "Dry-Run" if self.trading.dry_run else "Real"
+        self.logger.info(f"✅ {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
+        
+        # === Hedge mit Grid-Bounds aktualisieren ===
+        self._update_net_position()
+        price_list = self.calculator.calculate_price_list()
+        lower_bound = price_list[0]
+        upper_bound = price_list[-1]
+        step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+
+        self.hedge_manager.update_preemptive_hedge(
+            net_position_size=self.net_position_size,
+            dry_run=self.trading.dry_run,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            step=step
+        )
 
     def validate_config(self) -> None:
         """Config-Validierung mit spezifischen Exceptions"""
@@ -159,68 +225,100 @@ class GridManager:
             self.last_rebalance = now
 
     def update(self, current_price: float) -> None:
+        """Hauptupdate pro Tick – prüft Orders und Entry-Trigger (ohne Hedge/Config.grid_step)."""
         try:
             if not self.lifecycle.is_active():
                 return
+
+            # Rebalancing ggf. ausführen
             self._maybe_rebalance()
+
             entry_on_touch = bool(self.strategy.entry_on_touch)
             if not entry_on_touch:
                 return
+
             allow_long = self.grid_direction in ("long", "both")
             allow_short = self.grid_direction in ("short", "both")
+
             for lvl in self.levels:
                 if lvl.active or lvl.filled:
                     continue
+
                 if lvl.side == "BUY" and allow_long and current_price <= lvl.price:
                     self._place_entry(lvl)
                 elif lvl.side == "SELL" and allow_short and current_price >= lvl.price:
                     self._place_entry(lvl)
+
+            # === 🛡️ Hedge-Check am Ende ===
+            price_list = self.calculator.calculate_price_list()
+            if len(price_list) < 2:
+                step = 0.0
+            else:
+                step = abs(price_list[1] - price_list[0])
+
+            lower_bound = price_list[0]
+            upper_bound = price_list[-1]
+
+            self.hedge_manager.check_trigger(current_price, lower_bound, upper_bound, step)
+
+
         except Exception as e:
             self.logger.error(f"Update-Fehler: {e}")
             self.lifecycle.set_state(GridState.ERROR, str(e))
 
     def _place_entry(self, level: GridLevel) -> None:
         """Order platzieren mit RiskManager"""
-        # === NEU: Ordergröße via RiskManager ===
         size = self.risk_manager.calculate_effective_size()
-        
         if size <= 0:
             self.logger.warning("Effektive Ordergröße 0")
             return
-        
-        tp = level.tp
-        sl = level.sl
-        
-        # === NEU: TP/SL validieren ===
+
+        tp, sl = level.tp, level.sl
         if not self.risk_manager.validate_tp_sl(level.price, tp, sl, level.side):
             self.logger.error(f"TP/SL-Validierung fehlgeschlagen @ {level.price}")
             return
-        
+
         if self.trading.dry_run:
-            self.logger.info(
-                f"[SIM] {level.side} @ {level.price} | "
-                f"size={size} | TP={tp} | SL={sl}"
-            )
+            self.logger.info(f"[SIM] {level.side} @ {level.price} | size={size} | TP={tp} | SL={sl}")
             level.active, level.tp, level.sl = True, tp, sl
             return
-        
+
         try:
             order_id = self.client.place_order(
-                symbol=self.symbol, 
-                side=level.side, 
-                price=level.price, 
-                size=size,
-                take_profit=tp, 
-                stop_loss=sl, 
-                client_id_prefix=self.trading.client_id_prefix,
-                reduce_only=self.config.margin.auto_reduce_only, 
-                leverage=self.config.margin.leverage,
-                margin_mode=self.config.margin.mode,
+                symbol=self.symbol,
+                side=level.side,
+                order_type="LIMIT",
+                qty=size,
+                price=level.price,
+                trade_side="OPEN",
+                tp_price=tp,
+                sl_price=sl,
+                tp_stop_type="MARK_PRICE",
+                sl_stop_type="MARK_PRICE",
+                client_id=f"{self.trading.client_id_prefix}_{self.symbol}_{level.index}"
             )
+
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
             self.logger.info(f"{level.side} Order @ {level.price} → ID={order_id}")
+
         except Exception as e:
             raise OrderPlacementError(f"Order @ {level.price} fehlgeschlagen: {e}")
+        
+
+    def _update_net_position(self):
+        """Summiert alle AKTIVEN (nicht gefüllten) Long/Short-Level für Hedge."""
+        # Nur AKTIVE Orders zählen (nicht gefüllte!)
+        long_pos = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "BUY")
+        short_pos = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "SELL")
+        base_size = self.risk_manager.calculate_effective_size()
+        self.net_position_size = (long_pos - short_pos) * base_size
+        
+        # === Debug-Log ===
+        self.logger.info(
+            f"[HEDGE] 📊 Aktive Orders: Long={long_pos} Short={short_pos} "
+            f"→ Net={self.net_position_size:.2f}"
+        )
+
 
     def handle_error(self, error: Exception):
         msg = f"{type(error).__name__}: {error}"
@@ -318,6 +416,7 @@ class GridManager:
 
     def attach_account_sync(self, account_sync):
         self.account_sync = account_sync
+        account_sync.grid_manager = self
         self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
         self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
 
