@@ -3,6 +3,12 @@
 """
 GridManager mit RiskManager-Integration
 """
+from pathlib import Path
+import sys
+
+GRID_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(GRID_DIR))
+
 
 import logging
 import time
@@ -14,16 +20,7 @@ from .order_sync import OrderSync
 from .grid_calculator import GridCalculator
 from .risk_manager import RiskManager  
 from .hedge_manager import HedgeManager
-import sys
-from pathlib import Path
-
-GRID_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(GRID_DIR))
-
-from utils.exceptions import (
-    InvalidGridConfigError, OrderPlacementError,
-    GridInitializationError
-)
+from utils.exceptions import (InvalidGridConfigError, OrderPlacementError, GridInitializationError)
 from models.config_models import GridDirection 
 
 @dataclass
@@ -43,10 +40,11 @@ class GridLevel:
 
 
 class GridManager:
-    def __init__(self, client, config):
+    def __init__(self, client, config, client_pub=None):
         """Initialisiert den GridManager inklusive HedgeManager"""
         self.client = client                     # immer private client
         self.config = config
+        self.client_pub = client_pub
         self.symbol: str = config.symbol
         self.trading = config.trading
         self.grid_conf = config.grid
@@ -56,11 +54,6 @@ class GridManager:
 
         # === Grid Direction (Enum oder String) ===
         raw_dir = self.trading.grid_direction
-        try:
-            from models.config_models import GridDirection
-        except ImportError:
-            GridDirection = None
-
         if GridDirection and isinstance(raw_dir, GridDirection):
             self.grid_direction = raw_dir.value.lower()  # Enum → String ("long", "short", "both")
         else:
@@ -88,9 +81,14 @@ class GridManager:
         self.risk_manager = RiskManager(self.grid_conf, self.risk_conf, self.calculator, self.logger)
 
         # === HedgeManager ===
-        # immer den privaten client weiterreichen
-        from .hedge_manager import HedgeManager
-        self.hedge_manager = HedgeManager(config.hedge, self.client, self.symbol, self.logger, dry_run=self.trading.dry_run)
+        self.hedge_manager = HedgeManager(
+            config.hedge, 
+            self.client, 
+            self.symbol, 
+            self.logger, 
+            dry_run=self.trading.dry_run,
+            client_pub=self.client_pub
+        )
         self.hedge_manager.grid_direction = self.grid_direction
 
         # Dry-Run-Status an Hedge übergeben
@@ -157,6 +155,9 @@ class GridManager:
         
         mode = "Dry-Run" if self.trading.dry_run else "Real"
         self.logger.info(f"[ORDER] {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
+
+        # === Debug-Log hinzufügen ===
+        self.logger.info(f"[DEBUG] Rufe _update_net_position() auf...")
         
         # === Hedge mit Grid-Bounds aktualisieren ===
         self._update_net_position()
@@ -230,6 +231,8 @@ class GridManager:
             if not self.lifecycle.is_active():
                 return
 
+            # Letzten Preis speichern (für Hedge-Module)
+            self.hedge_manager.live_price = current_price
             # Rebalancing ggf. ausführen
             self._maybe_rebalance()
 
@@ -261,10 +264,21 @@ class GridManager:
 
             self.hedge_manager.check_trigger(current_price, lower_bound, upper_bound, step)
 
+            # 🔹 Falls beim Start kein Hedge platziert wurde (z. B. kein Live-Preis verfügbar)
+            if not getattr(self.hedge_manager, "active", False):
+                self.hedge_manager.update_preemptive_hedge(
+                    net_position_size=getattr(self, "net_position_size", 0),
+                    dry_run=self.trading.dry_run,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    step=step,
+                )
+
 
         except Exception as e:
             self.logger.error(f"Update-Fehler: {e}")
             self.lifecycle.set_state(GridState.ERROR, str(e))
+
 
     def _place_entry(self, level: GridLevel) -> None:
         """Order platzieren mit RiskManager"""

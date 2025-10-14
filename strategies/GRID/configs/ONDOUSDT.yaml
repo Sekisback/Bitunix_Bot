@@ -12,7 +12,7 @@ symbol: "ONDOUSDT"                  # Platzhalter, wird in Coin-Config überschr
 # ⚙️ TRADING-GRUNDEINSTELLUNGEN
 # -----------------------------------------------------------------------------
 trading:
-  dry_run: true                     # true = Simulation ohne echte Orders
+  dry_run: false                     # true = Simulation ohne echte Orders
   grid_direction: "long"           # "long", "short" oder "both" – Handelsrichtung
   client_id_prefix: "GRID"          # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
 

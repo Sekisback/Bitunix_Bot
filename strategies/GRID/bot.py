@@ -53,9 +53,7 @@ class GridBot:
         self.update_interval = config.system.update_interval
         self._stop = False
 
-        # self.exchange = client_pri if not self.dry_run else client_pub
-        # self.grid = GridManager(self.exchange, config)
-        self.grid = GridManager(client_pri, config)
+        self.grid = GridManager(client_pri, config, client_pub=client_pub)
 
         self.api_config = Config()
 
@@ -68,6 +66,7 @@ class GridBot:
         self.account_sync = AccountSync(client_pri, self.symbol)
         self.account_sync.preload_pending_orders()
         self.grid.attach_account_sync(self.account_sync)
+        
 
     async def _on_public_ws(self, channel, data):
         """Callback für Public WS"""
