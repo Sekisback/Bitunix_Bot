@@ -2,6 +2,12 @@
 """
 HedgeManager – verwaltet Hedge-Logik bei Ausbruch aus dem Grid-Bereich.
 Mit PriceProtectScope-Validierung (Bitunix API).
+
+FIXES:
+- ✅ get_size() nutzt jetzt net_position
+- ✅ live_price wird initialisiert
+- ✅ update_preemptive_hedge() prüft None-Werte
+- ✅ place_order() prüft live_price früher
 """
 
 import logging
@@ -18,6 +24,7 @@ class HedgeManager:
         self.active = False
         self.dry_run = dry_run
         self.price_protect_scope = None
+        self.live_price = None  # ✅ FIX: Initialisierung hinzugefügt
 
         # Trading Pair Info laden (priceProtectScope)
         self._load_trading_pair_info()
@@ -109,28 +116,38 @@ class HedgeManager:
 
         self.logger.info(f"[HEDGE] ⚡ Hedge {hedge_side} @ {hedge_price:.4f}")
 
+        # ✅ FIX: net_position an get_size() übergeben
+        net_pos = getattr(self, "current_net_position", 0)
+
         if mode == "direct":
-            self.place_order(hedge_side, hedge_price, self.get_size())
+            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_pos))
 
         elif mode == "dynamic":
             partials = getattr(self.config, "partial_levels", [0.5, 0.75, 1.0])
             for lvl in partials:
                 offset_price = hedge_price - (step * lvl) if hedge_side == "SELL" else hedge_price + (step * lvl)
-                self.place_order(hedge_side, offset_price, self.get_size(fraction=lvl))
+                self.place_order(hedge_side, offset_price, self.get_size(net_position=net_pos, fraction=lvl))
 
         elif mode == "reversal":
-            self.place_order(hedge_side, hedge_price, self.get_size(multiplier=2.0))
+            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_pos, multiplier=2.0))
 
         self.active = True
 
     # ----------------------------------------------------------------
-    def get_size(self, fraction: float = 1.0, multiplier: float = 1.0) -> float:
-        """Berechnet Hedge-Größe basierend auf Config."""
+    def get_size(self, net_position: float = 0, fraction: float = 1.0, multiplier: float = 1.0) -> float:
+        """
+        Berechnet Hedge-Größe basierend auf Config.
+        
+        ✅ FIX: Nutzt jetzt net_position statt festen Wert
+        """
         size_mode = getattr(self.config, "size_mode", "net_position")
         fixed_ratio = getattr(self.config, "fixed_size_ratio", 0.5)
+        
         if size_mode == "fixed":
-            return fixed_ratio * fraction
-        return 1.0 * fraction * multiplier
+            return fixed_ratio * fraction * multiplier
+        
+        # ✅ FIX: Echte Net-Position verwenden!
+        return abs(net_position) * fraction * multiplier
 
     # ----------------------------------------------------------------
     def place_order(self, side: str, price: float, size: float):
@@ -139,11 +156,12 @@ class HedgeManager:
             self.logger.warning("[HEDGE] ❌ Ungültige Hedge-Größe (0)")
             return
 
-        current_price = getattr(self, "live_price", None)
-        if not current_price:
-            self.logger.warning("[HEDGE] ⚠️ Kein Live-Preis verfügbar – Orderprüfung übersprungen")
+        # ✅ FIX: Früher prüfen ob live_price existiert
+        if not self.live_price:
+            self.logger.warning("[HEDGE] ⚠️ Kein Live-Preis verfügbar → Order übersprungen")
             return
 
+        current_price = self.live_price
         scope = self.price_protect_scope or 0.05
         min_price = current_price * (1 - scope)
         max_price = current_price * (1 + scope)
@@ -199,12 +217,15 @@ class HedgeManager:
         self.active = False
 
     # ----------------------------------------------------------------
-    def update_preemptive_hedge(self, net_position_size: float, dry_run: bool = False, lower_bound: float = None, upper_bound: float = None, step: float = None):
+    def update_preemptive_hedge(self, net_position_size: float, dry_run: bool = False, 
+                                lower_bound: float = None, upper_bound: float = None, step: float = None):
+        """
+        Passt präventiven Hedge an offene Grid-Orders an.
         
-        # === Debug-Log ===
+        ✅ FIX: Prüft jetzt alle None-Werte vor Berechnung
+        """
         self.logger.info(f"[HEDGE] 🔍 update_preemptive_hedge() aufgerufen: net={net_position_size:.2f}, dry_run={dry_run}")
 
-        """Passt präventiven Hedge an offene Grid-Orders an."""
         if not getattr(self.config, "enabled", False):
             self.logger.warning("[HEDGE] ⚠️ Hedge nicht aktiviert (config.enabled=False)")
             return
@@ -220,26 +241,31 @@ class HedgeManager:
             self.active = False
             return
 
-        grid_mode = getattr(self, "grid_direction", "long")
+        # ✅ FIX: Prüfe ob Grid-Bounds vorhanden sind
+        if not (lower_bound and upper_bound and step):
+            self.logger.warning("[HEDGE] ⚠️ Keine Grid-Bounds verfügbar → kein Hedge")
+            return
+
+        grid_mode = getattr(self.config, "grid_direction", "long")
 
         if grid_mode == "long":
             hedge_side = "SELL"
             hedge_qty = abs(net_position_size)
-            hedge_price = (lower_bound - step) if (lower_bound and step) else None
+            hedge_price = lower_bound - step
         elif grid_mode == "short":
             hedge_side = "BUY"
             hedge_qty = abs(net_position_size)
-            hedge_price = (upper_bound + step) if (upper_bound and step) else None
+            hedge_price = upper_bound + step
         else:
             return
 
-        if not hedge_price:
-            self.logger.warning("[HEDGE] ⚠️ Kein Hedge-Preis berechenbar – kein Orderversuch")
+        # ✅ FIX: Zusätzlicher Check
+        if not hedge_price or hedge_price <= 0:
+            self.logger.warning("[HEDGE] ⚠️ Ungültiger Hedge-Preis berechnet")
             return
-        
-        # # kein Livepreis verfügbar → Hedge verschieben
-        # if not getattr(self, "live_price", None):
-        #     return
+
+        # Net-Position für get_size() speichern
+        self.current_net_position = net_position_size
 
         if dry_run:
             self.logger.info(f"[HEDGE] Würde {hedge_side} {hedge_qty:.2f} @ {hedge_price:.6f} platzieren")

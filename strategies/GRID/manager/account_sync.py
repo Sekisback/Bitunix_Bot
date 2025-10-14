@@ -1,3 +1,12 @@
+# strategies/GRID/manager/account_sync.py (KORRIGIERT)
+"""
+AccountSync - Verwaltung und Synchronisierung von Account-Daten
+
+FIXES:
+- ✅ _handle_order_fill() prüft grid_manager auf None
+- ✅ _handle_order_cancel() prüft grid_manager auf None
+- ✅ Robustere Error-Behandlung
+"""
 import logging
 import time
 import sys
@@ -69,16 +78,20 @@ class AccountSync:
             elif status in ("filled", "partially_filled"):
                 self.logger.info(f"✅ Filled: {side} {qty}@{price}")
                 
-                # === NEU: Hedge bei Fill aktualisieren ===
+                # ✅ FIX: Prüfe ob grid_manager existiert
                 if self.grid_manager:
                     self._handle_order_fill(order_id, data)
+                else:
+                    self.logger.warning("⚠️ Fill-Event: GridManager nicht verfügbar")
             
             elif status in ("cancelled", "rejected"):
                 self.logger.warning(f"⚠️ Cancelled: {side} {qty}@{price}")
                 
-                # === NEU: Hedge bei Cancel aktualisieren ===
+                # ✅ FIX: Prüfe ob grid_manager existiert
                 if self.grid_manager:
                     self._handle_order_cancel(order_id, data)
+                else:
+                    self.logger.warning("⚠️ Cancel-Event: GridManager nicht verfügbar")
 
         except Exception as e:
             self.logger.error(f"Order update error: {e}")
@@ -100,11 +113,14 @@ class AccountSync:
         """
         Behandelt gefüllte Grid-Orders und aktualisiert Hedge.
         
-        Args:
-            order_id: Order-ID der gefüllten Order
-            order_data: Order-Details vom WebSocket
+        ✅ FIX: Robustere Error-Behandlung
         """
         try:
+            # ✅ Zusätzlicher Sicherheits-Check
+            if not self.grid_manager:
+                self.logger.warning("⚠️ Fill-Handler: GridManager=None")
+                return
+            
             price = float(order_data.get("price", 0))
             
             # Finde entsprechendes Grid-Level
@@ -129,10 +145,21 @@ class AccountSync:
             
             # Hedge mit Grid-Bounds aktualisieren
             self.grid_manager._update_net_position()
+            
+            # ✅ Prüfe ob calculator existiert
+            if not hasattr(self.grid_manager, 'calculator'):
+                self.logger.error("⚠️ GridCalculator fehlt!")
+                return
+            
             price_list = self.grid_manager.calculator.calculate_price_list()
             lower_bound = price_list[0]
             upper_bound = price_list[-1]
             step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+
+            # ✅ Prüfe ob hedge_manager existiert
+            if not hasattr(self.grid_manager, 'hedge_manager'):
+                self.logger.error("⚠️ HedgeManager fehlt!")
+                return
 
             self.grid_manager.hedge_manager.update_preemptive_hedge(
                 net_position_size=self.grid_manager.net_position_size,
@@ -144,16 +171,20 @@ class AccountSync:
             
         except Exception as e:
             self.logger.error(f"❌ Fill-Handler Fehler: {e}")
+            # ✅ Kein raise, damit WS weiterläuft
 
     def _handle_order_cancel(self, order_id: str, order_data: Dict[str, Any]):
         """
         Behandelt gecancelte Grid-Orders und aktualisiert Hedge.
         
-        Args:
-            order_id: Order-ID der gecancelten Order
-            order_data: Order-Details vom WebSocket
+        ✅ FIX: Robustere Error-Behandlung
         """
         try:
+            # ✅ Zusätzlicher Sicherheits-Check
+            if not self.grid_manager:
+                self.logger.warning("⚠️ Cancel-Handler: GridManager=None")
+                return
+            
             price = float(order_data.get("price", 0))
             
             # Finde entsprechendes Grid-Level
@@ -174,6 +205,12 @@ class AccountSync:
             
             # Hedge aktualisieren
             self.grid_manager._update_net_position()
+            
+            # ✅ Prüfe ob hedge_manager existiert
+            if not hasattr(self.grid_manager, 'hedge_manager'):
+                self.logger.error("⚠️ HedgeManager fehlt!")
+                return
+            
             self.grid_manager.hedge_manager.update_preemptive_hedge(
                 net_position_size=self.grid_manager.net_position_size,
                 dry_run=self.grid_manager.trading.dry_run
@@ -181,6 +218,7 @@ class AccountSync:
             
         except Exception as e:
             self.logger.error(f"❌ Cancel-Handler Fehler: {e}")
+            # ✅ Kein raise, damit WS weiterläuft
 
     async def on_ws_event(self, channel: str, data: Dict[str, Any]):
         """Dispatcher für WS-Events"""

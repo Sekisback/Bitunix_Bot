@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
-# strategies/GRID/manager/grid_manager.py (Paket 4b)
+# strategies/GRID/manager/grid_manager.py (KORRIGIERT)
 """
 GridManager mit RiskManager-Integration
+
+FIXES:
+- ✅ _update_net_position() zählt jetzt GEFÜLLTE + PENDING Orders korrekt
+- ✅ Verbesserte Net-Position-Berechnung für Hedge
 """
 from pathlib import Path
 import sys
@@ -65,6 +69,9 @@ class GridManager:
         self._levels_lock = asyncio.Lock()
         self.margin_mode = config.margin.mode
         self.leverage = config.margin.leverage
+        
+        # ✅ NEU: Net-Position Tracking
+        self.net_position_size = 0.0
 
         # === Logging ===
         self.logger = logging.getLogger("GridManager")
@@ -156,9 +163,6 @@ class GridManager:
         mode = "Dry-Run" if self.trading.dry_run else "Real"
         self.logger.info(f"[ORDER] {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
 
-        # === Debug-Log hinzufügen ===
-        self.logger.info(f"[DEBUG] Rufe _update_net_position() auf...")
-        
         # === Hedge mit Grid-Bounds aktualisieren ===
         self._update_net_position()
         price_list = self.calculator.calculate_price_list()
@@ -226,7 +230,7 @@ class GridManager:
             self.last_rebalance = now
 
     def update(self, current_price: float) -> None:
-        """Hauptupdate pro Tick – prüft Orders und Entry-Trigger (ohne Hedge/Config.grid_step)."""
+        """Hauptupdate pro Tick – prüft Orders und Entry-Trigger."""
         try:
             if not self.lifecycle.is_active():
                 return
@@ -267,13 +271,12 @@ class GridManager:
             # 🔹 Falls beim Start kein Hedge platziert wurde (z. B. kein Live-Preis verfügbar)
             if not getattr(self.hedge_manager, "active", False):
                 self.hedge_manager.update_preemptive_hedge(
-                    net_position_size=getattr(self, "net_position_size", 0),
+                    net_position_size=self.net_position_size,
                     dry_run=self.trading.dry_run,
                     lower_bound=lower_bound,
                     upper_bound=upper_bound,
                     step=step,
                 )
-
 
         except Exception as e:
             self.logger.error(f"Update-Fehler: {e}")
@@ -295,6 +298,8 @@ class GridManager:
         if self.trading.dry_run:
             self.logger.info(f"[ORDER] {level.side} @ {level.price:.4f} | size={size} | TP={tp:.4f} | SL={f'{sl:.4f}' if isinstance(sl, float) else sl}")
             level.active, level.tp, level.sl = True, tp, sl
+            # ✅ Wichtig: Net-Position updaten nach jeder Order
+            self._update_net_position()
             return
 
         try:
@@ -314,23 +319,40 @@ class GridManager:
 
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
             self.logger.info(f"[{self.symbol}] {level.side} Order @ {level.price:.4f} → ID={order_id}")
+            
+            # ✅ Wichtig: Net-Position updaten nach jeder Order
+            self._update_net_position()
 
         except Exception as e:
             raise OrderPlacementError(f"Order @ {level.price} fehlgeschlagen: {e}")
         
 
     def _update_net_position(self):
-        """Summiert alle AKTIVEN (nicht gefüllten) Long/Short-Level für Hedge."""
-        # Nur AKTIVE Orders zählen (nicht gefüllte!)
-        long_pos = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "BUY")
-        short_pos = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "SELL")
-        base_size = self.risk_manager.calculate_effective_size()
-        self.net_position_size = (long_pos - short_pos) * base_size
+        """
+        Summiert GEFÜLLTE Positionen + AKTIVE Orders für Hedge-Berechnung.
         
-        # === Debug-Log ===
+        ✅ FIX: Korrekte Unterscheidung zwischen filled und pending
+        """
+        # Gefüllte Positionen (echte Exposure)
+        long_filled = sum(1 for lvl in self.levels if lvl.filled and lvl.side == "BUY")
+        short_filled = sum(1 for lvl in self.levels if lvl.filled and lvl.side == "SELL")
+        
+        # Aktive Orders (noch nicht gefüllt, aber Exposure-Risiko)
+        long_pending = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "BUY")
+        short_pending = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "SELL")
+        
+        base_size = self.risk_manager.calculate_effective_size()
+        
+        # ✅ FIX: Echte Position + Pending Orders
+        # Für präventiven Hedge zählen wir BEIDE
+        self.net_position_size = (long_filled - short_filled + long_pending - short_pending) * base_size
+        
+        # === Detailliertes Debug-Log ===
         self.logger.info(
-            f"[HEDGE] Aktive Orders: Long={long_pos} Short={short_pos} "
-            f"→ Net={self.net_position_size:.2f}"
+            f"[HEDGE] Position-Status: "
+            f"Filled(Long={long_filled} Short={short_filled}) "
+            f"Pending(Long={long_pending} Short={short_pending}) "
+            f"→ Net={self.net_position_size:.2f} (Base={base_size:.2f})"
         )
 
 
@@ -377,7 +399,7 @@ class GridManager:
         total = len(self.levels)
         active = sum(1 for l in self.levels if l.active)
         filled = sum(1 for l in self.levels if l.filled)
-        self.logger.info(f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled}")
+        self.logger.info(f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | Net: {self.net_position_size:.2f}")
 
     def log_summary(self) -> None:
         """Erweiterte Summary mit Risk-Info"""
@@ -397,7 +419,7 @@ class GridManager:
         )
         self.logger.info(f"Base Size  : {self.grid_conf.base_order_size}")
         
-        # === NEU: Risk-Summary ===
+        # === Risk-Summary ===
         try:
             risk_info = self.risk_manager.get_risk_summary()
             self.logger.info(f"Take Profit: {risk_info['tp_mode']}")
