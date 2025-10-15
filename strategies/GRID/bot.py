@@ -76,10 +76,19 @@ class GridBot:
                 if not price_data:
                     return
                 last_price = float(price_data.get("la", price_data.get("c", 0)))
-                if last_price != getattr(self, "_last_price", None):
-                    self._last_price = last_price
-                    logger.info(f"💰 {self.symbol} @ {last_price:.4f}")
-                    self.grid.update(last_price)
+                
+                # ✅ NEU: Nur bei signifikanten Änderungen loggen
+                old_price = getattr(self, "_last_price", None)
+                if old_price:
+                    change_pct = abs(last_price - old_price) / old_price
+                    if change_pct < 0.001:  # < 0.1% → Skip Log
+                        self._last_price = last_price
+                        self.grid.update(last_price)
+                        return
+                
+                self._last_price = last_price
+                logger.info(f"💰 {self.symbol} @ {last_price:.4f}")
+                self.grid.update(last_price)
         except Exception as e:
             logger.error(f"Public WS error: {e}")
     

@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-# strategies/GRID/manager/grid_manager.py (KORRIGIERT)
+# strategies/GRID/manager/grid_manager.py (KORREKTE Grid-Logik)
 """
-GridManager mit RiskManager-Integration
+GridManager mit KORREKTER Grid-Order-Platzierung
 
-FIXES:
-- ✅ _update_net_position() zählt jetzt GEFÜLLTE + PENDING Orders korrekt
-- ✅ Verbesserte Net-Position-Berechnung für Hedge
+KRITISCHER FIX:
+- ✅ LONG: Orders nur UNTER aktuellem Preis
+- ✅ SHORT: Orders nur ÜBER aktuellem Preis
+- ✅ Keine Breakout-Orders mehr!
+- ✅ Progressive Order-Platzierung
 """
 from pathlib import Path
 import sys
@@ -18,7 +20,7 @@ import logging
 import time
 import asyncio
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from .grid_lifecycle import GridLifecycle, GridState
 from .order_sync import OrderSync
 from .grid_calculator import GridCalculator
@@ -33,8 +35,10 @@ class GridLevel:
     price: float
     side: str
     order_id: Optional[str] = None
-    active: bool = False
-    filled: bool = False
+    active: bool = False           # Order platziert
+    filled: bool = False           # Order gefüllt
+    position_open: bool = False    # ← NEU: Position noch offen
+    position_id: Optional[str] = None  # ← NEU: Position-ID
     tp: Optional[float] = None
     sl: Optional[float] = None
 
@@ -46,7 +50,7 @@ class GridLevel:
 class GridManager:
     def __init__(self, client, config, client_pub=None):
         """Initialisiert den GridManager inklusive HedgeManager"""
-        self.client = client                     # immer private client
+        self.client = client
         self.config = config
         self.client_pub = client_pub
         self.symbol: str = config.symbol
@@ -56,10 +60,10 @@ class GridManager:
         self.strategy = config.strategy
         self.system = config.system
 
-        # === Grid Direction (Enum oder String) ===
+        # === Grid Direction ===
         raw_dir = self.trading.grid_direction
         if GridDirection and isinstance(raw_dir, GridDirection):
-            self.grid_direction = raw_dir.value.lower()  # Enum → String ("long", "short", "both")
+            self.grid_direction = raw_dir.value.lower()
         else:
             self.grid_direction = str(raw_dir).strip().lower()
 
@@ -70,8 +74,16 @@ class GridManager:
         self.margin_mode = config.margin.mode
         self.leverage = config.margin.leverage
         
-        # ✅ NEU: Net-Position Tracking
+        # Net-Position Tracking
         self.net_position_size = 0.0
+        
+        # Hedge-Trigger-Tracking
+        self._last_hedge_check = 0.0
+        self._hedge_check_interval = 10
+        self._last_price_for_hedge = None
+        
+        # ✅ NEU: Letzter bekannter Preis für Grid-Placement
+        self._last_known_price = None
 
         # === Logging ===
         self.logger = logging.getLogger("GridManager")
@@ -98,7 +110,6 @@ class GridManager:
         )
         self.hedge_manager.grid_direction = self.grid_direction
 
-        # Dry-Run-Status an Hedge übergeben
         try:
             self.hedge_manager.config.dry_run = bool(self.trading.dry_run)
         except Exception:
@@ -127,8 +138,18 @@ class GridManager:
                 grid_direction=self.grid_direction,
             )
 
-            # ========== Initiale Grid-Orders platzieren ==========
-            self._place_initial_grid_orders()
+            # === NEU: VirtualOrderManager (Dry-Run) ===
+            if self.trading.dry_run:
+                from .virtual_order_manager import VirtualOrderManager
+                self.virtual_manager = VirtualOrderManager(self.symbol, self.logger)
+                self.logger.info("[VIRTUAL] 🎮 Dry-Run Mode mit Virtual Orders aktiv")
+            else:
+                self.virtual_manager = None
+            # Flag für initiale Order-Platzierung
+            self._initial_orders_placed = False
+
+            # Warte auf ersten Preis!
+            self.logger.warning("[INIT] ⏳ Warte auf ersten Live-Preis vor Order-Platzierung...")
 
         except (InvalidGridConfigError, GridInitializationError) as e:
             self.lifecycle.set_state(GridState.ERROR, message=str(e))
@@ -138,22 +159,78 @@ class GridManager:
             raise GridInitializationError(f"Grid-Initialisierung fehlgeschlagen: {e}")
 
 
-    def _place_initial_grid_orders(self) -> None:
-        """Platziert alle Grid-Orders initial (Real oder Dry-Run)"""
+    def _place_initial_grid_orders(self, current_price: float) -> None:
+        """
+        Platziert Grid-Orders basierend auf aktuellem Preis.
+        
+        ✅ KRITISCHER FIX:
+        - LONG: Nur Orders UNTER aktuellem Preis
+        - SHORT: Nur Orders ÜBER aktuellem Preis
+        
+        Args:
+            current_price: Aktueller Live-Preis
+        """
+        # === NEU: Out-of-Range Check ===
+        lower = self.grid_conf.lower_price
+        upper = self.grid_conf.upper_price
+        
+        # Warnung wenn Preis außerhalb Grid
+        if current_price < lower:
+            self.logger.warning(
+                f"⚠️ Preis {current_price:.4f} UNTER Grid ({lower:.4f} - {upper:.4f})"
+            )
+            if self.grid_direction == "short":
+                self.logger.info("SHORT-Grid: Warte bis Preis in Range...")
+                return  # Keine Orders bei SHORT wenn Preis zu niedrig
+        
+        elif current_price > upper:
+            self.logger.warning(
+                f"⚠️ Preis {current_price:.4f} ÜBER Grid ({lower:.4f} - {upper:.4f})"
+            )
+            if self.grid_direction == "long":
+                self.logger.info("LONG-Grid: Warte bis Preis in Range...")
+                return  # Keine Orders bei LONG wenn Preis zu hoch
+        
         allow_long = self.grid_direction in ("long", "both")
         allow_short = self.grid_direction in ("short", "both")
         
         placed_count = 0
+        skipped_count = 0
         
         for lvl in self.levels:
-            if lvl.active or lvl.filled:
+            # ✅ NEU: Auch position_open prüfen
+            if lvl.active or lvl.filled or lvl.position_open:
                 continue
             
-            if lvl.side == "BUY" and not allow_long:
-                continue
-            if lvl.side == "SELL" and not allow_short:
-                continue
+            # ✅ LONG: Nur Orders UNTER aktuellem Preis
+            if lvl.side == "BUY":
+                if not allow_long:
+                    continue
+                
+                # ❌ Order über Preis → Skip (wäre Breakout!)
+                if lvl.price >= current_price:
+                    skipped_count += 1
+                    self.logger.debug(
+                        f"[INIT] Skip BUY @ {lvl.price:.4f} "
+                        f"(über Preis {current_price:.4f})"
+                    )
+                    continue
             
+            # ✅ SHORT: Nur Orders ÜBER aktuellem Preis
+            elif lvl.side == "SELL":
+                if not allow_short:
+                    continue
+                
+                # ❌ Order unter Preis → Skip (wäre Breakout!)
+                if lvl.price <= current_price:
+                    skipped_count += 1
+                    self.logger.debug(
+                        f"[INIT] Skip SELL @ {lvl.price:.4f} "
+                        f"(unter Preis {current_price:.4f})"
+                    )
+                    continue
+            
+            # Platziere Order
             try:
                 self._place_entry(lvl)
                 placed_count += 1
@@ -161,22 +238,15 @@ class GridManager:
                 self.logger.error(f"❌ Initial Order @ {lvl.price} fehlgeschlagen: {e}")
         
         mode = "Dry-Run" if self.trading.dry_run else "Real"
-        self.logger.info(f"[ORDER] {placed_count}/{len(self.levels)} Grid-Orders platziert ({mode})")
-
-        # === Hedge mit Grid-Bounds aktualisieren ===
-        self._update_net_position()
-        price_list = self.calculator.calculate_price_list()
-        lower_bound = price_list[0]
-        upper_bound = price_list[-1]
-        step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
-
-        self.hedge_manager.update_preemptive_hedge(
-            net_position_size=self.net_position_size,
-            dry_run=self.trading.dry_run,
-            lower_bound=lower_bound,
-            upper_bound=upper_bound,
-            step=step
+        self.logger.info(
+            f"[ORDER] {placed_count}/{len(self.levels)} Grid-Orders platziert, "
+            f"{skipped_count} übersprungen @ Preis {current_price:.4f} ({mode})"
         )
+
+        # Hedge initial platzieren
+        if placed_count > 0:
+            self._update_and_hedge("initial_orders")
+
 
     def validate_config(self) -> None:
         """Config-Validierung mit spezifischen Exceptions"""
@@ -230,57 +300,148 @@ class GridManager:
             self.last_rebalance = now
 
     def update(self, current_price: float) -> None:
-        """Hauptupdate pro Tick – prüft Orders und Entry-Trigger."""
+        """
+        Hauptupdate pro Tick – prüft Orders, Entry-Trigger und Hedge-Möglichkeit.
+        
+        ✅ NEU: Platziert initiale Orders beim ersten Preis
+        """
         try:
             if not self.lifecycle.is_active():
                 return
 
-            # Letzten Preis speichern (für Hedge-Module)
+            # Letzten Preis speichern
             self.hedge_manager.live_price = current_price
+            self._last_known_price = current_price
+            
+            # === NEU: VIRTUAL ORDER CHECKS (Dry-Run) ===
+            if self.trading.dry_run and self.virtual_manager:
+                # Fill-Detection
+                filled_orders = self.virtual_manager.check_fills(current_price)
+                for order in filled_orders:
+                    # Finde entsprechendes Level
+                    for lvl in self.levels:
+                        if lvl.order_id == order.order_id:
+                            self.handle_order_fill(lvl)
+                            break
+                
+                # TP/SL Trigger
+                closed_positions = self.virtual_manager.check_tp_sl(current_price)
+                if closed_positions:
+                    self.logger.debug(
+                        f"[VIRTUAL] TP/SL getriggert: {len(closed_positions)} Positionen geschlossen"
+                    )
+
+            
+            # ✅ NEU: Initiale Order-Platzierung beim ersten Preis
+            if not self._initial_orders_placed:
+                self.logger.info(
+                    f"[INIT] ✅ Erster Preis empfangen: {current_price:.4f} "
+                    f"→ Platziere Grid-Orders"
+                )
+                self._place_initial_grid_orders(current_price)
+                self._initial_orders_placed = True  # ✅ Flag setzen
+                return
+            
             # Rebalancing ggf. ausführen
             self._maybe_rebalance()
 
+            # Entry-Orders prüfen (neue Orders wenn Preis sich bewegt)
             entry_on_touch = bool(self.strategy.entry_on_touch)
-            if not entry_on_touch:
-                return
+            if entry_on_touch:
+                self._check_new_grid_orders(current_price)
 
-            allow_long = self.grid_direction in ("long", "both")
-            allow_short = self.grid_direction in ("short", "both")
-
-            for lvl in self.levels:
-                if lvl.active or lvl.filled:
-                    continue
-
-                if lvl.side == "BUY" and allow_long and current_price <= lvl.price:
-                    self._place_entry(lvl)
-                elif lvl.side == "SELL" and allow_short and current_price >= lvl.price:
-                    self._place_entry(lvl)
-
-            # === 🛡️ Hedge-Check am Ende ===
-            price_list = self.calculator.calculate_price_list()
-            if len(price_list) < 2:
-                step = 0.0
-            else:
-                step = abs(price_list[1] - price_list[0])
-
-            lower_bound = price_list[0]
-            upper_bound = price_list[-1]
-
-            self.hedge_manager.check_trigger(current_price, lower_bound, upper_bound, step)
-
-            # 🔹 Falls beim Start kein Hedge platziert wurde (z. B. kein Live-Preis verfügbar)
-            if not getattr(self.hedge_manager, "active", False):
-                self.hedge_manager.update_preemptive_hedge(
-                    net_position_size=self.net_position_size,
-                    dry_run=self.trading.dry_run,
-                    lower_bound=lower_bound,
-                    upper_bound=upper_bound,
-                    step=step,
-                )
+            # Smart Hedge-Trigger
+            self._check_hedge_opportunity(current_price)
 
         except Exception as e:
             self.logger.error(f"Update-Fehler: {e}")
             self.lifecycle.set_state(GridState.ERROR, str(e))
+
+    def _check_new_grid_orders(self, current_price: float) -> None:
+        """
+        ✅ NEU: Prüft ob neue Grid-Orders platziert werden können.
+        
+        LONG: Wenn Preis steigt → neue Orders UNTER dem Preis
+        SHORT: Wenn Preis fällt → neue Orders ÜBER dem Preis
+        """
+        allow_long = self.grid_direction in ("long", "both")
+        allow_short = self.grid_direction in ("short", "both")
+
+        for lvl in self.levels:
+            # ✅ NEU: Auch position_open prüfen
+            if lvl.active or lvl.filled or lvl.position_open:
+                continue
+
+            # LONG: Platziere BUY wenn Preis ÜBER Level ist
+            if lvl.side == "BUY" and allow_long:
+                if current_price > lvl.price:
+                    self._place_entry(lvl)
+            
+            # SHORT: Platziere SELL wenn Preis UNTER Level ist
+            elif lvl.side == "SELL" and allow_short:
+                if current_price < lvl.price:
+                    self._place_entry(lvl)
+
+    def _check_hedge_opportunity(self, current_price: float) -> None:
+        """Prüft ob Hedge jetzt platzierbar ist (Smart Throttling)"""
+        now = time.time()
+        
+        # Throttling: Nur alle X Sekunden prüfen
+        if now - self._last_hedge_check < self._hedge_check_interval:
+            return
+        
+        # Preis-Änderungs-Check: Nur bei signifikanten Bewegungen
+        if self._last_price_for_hedge:
+            price_change_pct = abs(current_price - self._last_price_for_hedge) / self._last_price_for_hedge
+            if price_change_pct < 0.01:  # < 1% Bewegung → Skip
+                return
+        
+        self._last_hedge_check = now
+        self._last_price_for_hedge = current_price
+        
+        # Prüfe ob Hedge aktiv ist
+        if getattr(self.hedge_manager, "active", False):
+            self.logger.debug("[HEDGE] Hedge bereits aktiv → Skip Check")
+            return
+        
+        # Prüfe ob Net-Position vorhanden
+        if abs(self.net_position_size) < 0.001:
+            return
+        
+        # Grid-Bounds holen
+        price_list = self.calculator.calculate_price_list()
+        lower_bound = price_list[0]
+        upper_bound = price_list[-1]
+        step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+        
+        # Hedge-Preis berechnen
+        if self.grid_direction == "long":
+            hedge_price = lower_bound - step
+        elif self.grid_direction == "short":
+            hedge_price = upper_bound + step
+        else:
+            return
+        
+        # PriceProtectScope prüfen
+        scope = self.hedge_manager.price_protect_scope or 0.05
+        min_price = current_price * (1 - scope)
+        max_price = current_price * (1 + scope)
+        
+        # Prüfe ob Hedge JETZT platzierbar ist
+        is_within_scope = False
+        
+        if self.grid_direction == "long":
+            is_within_scope = hedge_price >= min_price
+        elif self.grid_direction == "short":
+            is_within_scope = hedge_price <= max_price
+        
+        if is_within_scope:
+            self.logger.info(
+                f"[HEDGE] 🎯 Preis jetzt in Range für Hedge! "
+                f"Live={current_price:.4f} | Hedge={hedge_price:.4f}"
+            )
+            
+            self._update_and_hedge("price_in_range")
 
 
     def _place_entry(self, level: GridLevel) -> None:
@@ -295,13 +456,37 @@ class GridManager:
             self.logger.error(f"TP/SL-Validierung fehlgeschlagen @ {level.price}")
             return
 
-        if self.trading.dry_run:
-            self.logger.info(f"[ORDER] {level.side} @ {level.price:.4f} | size={size} | TP={tp:.4f} | SL={f'{sl:.4f}' if isinstance(sl, float) else sl}")
-            level.active, level.tp, level.sl = True, tp, sl
-            # ✅ Wichtig: Net-Position updaten nach jeder Order
-            self._update_net_position()
+        # === VIRTUAL ORDER (Dry-Run) ===
+        if self.trading.dry_run and self.virtual_manager:
+            order_id = self.virtual_manager.place_order(
+                side=level.side,
+                order_type="LIMIT",
+                qty=size,
+                price=level.price,
+                tp_price=tp,
+                sl_price=sl,
+                client_id=f"{self.trading.client_id_prefix}_{self.symbol}_{level.index}"
+            )
+            
+            level.order_id = order_id
+            level.active = True
+            level.tp, level.sl = tp, sl
+            
+            # ✅ Formatierung außerhalb des f-strings
+            tp_str = f"{tp:.4f}" if tp else "None"
+            sl_str = f"{sl:.4f}" if sl else "None"
+
+            
+            self.logger.info(
+                f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
+                f"size={size} | TP={tp_str} | SL={sl_str}"
+            )
+            
+            # Hedge updaten
+            self._update_and_hedge("virtual_order_placed")
             return
 
+        # === ECHTE ORDER (Live Mode) ===
         try:
             order_id = self.client.place_order(
                 symbol=self.symbol,
@@ -320,40 +505,162 @@ class GridManager:
             level.order_id, level.active, level.tp, level.sl = order_id, True, tp, sl
             self.logger.info(f"[{self.symbol}] {level.side} Order @ {level.price:.4f} → ID={order_id}")
             
-            # ✅ Wichtig: Net-Position updaten nach jeder Order
-            self._update_net_position()
+            self._update_and_hedge("order_placed")
 
         except Exception as e:
             raise OrderPlacementError(f"Order @ {level.price} fehlgeschlagen: {e}")
-        
-
+            
     def _update_net_position(self):
-        """
-        Summiert GEFÜLLTE Positionen + AKTIVE Orders für Hedge-Berechnung.
-        
-        ✅ FIX: Korrekte Unterscheidung zwischen filled und pending
-        """
-        # Gefüllte Positionen (echte Exposure)
+        """Summiert GEFÜLLTE Positionen + AKTIVE Orders für Hedge-Berechnung."""
         long_filled = sum(1 for lvl in self.levels if lvl.filled and lvl.side == "BUY")
         short_filled = sum(1 for lvl in self.levels if lvl.filled and lvl.side == "SELL")
         
-        # Aktive Orders (noch nicht gefüllt, aber Exposure-Risiko)
         long_pending = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "BUY")
         short_pending = sum(1 for lvl in self.levels if lvl.active and not lvl.filled and lvl.side == "SELL")
         
         base_size = self.risk_manager.calculate_effective_size()
         
-        # ✅ FIX: Echte Position + Pending Orders
-        # Für präventiven Hedge zählen wir BEIDE
         self.net_position_size = (long_filled - short_filled + long_pending - short_pending) * base_size
         
-        # === Detailliertes Debug-Log ===
-        self.logger.info(
+        self.logger.debug(
             f"[HEDGE] Position-Status: "
             f"Filled(Long={long_filled} Short={short_filled}) "
             f"Pending(Long={long_pending} Short={short_pending}) "
             f"→ Net={self.net_position_size:.2f} (Base={base_size:.2f})"
         )
+
+    def _update_and_hedge(self, trigger: str = "unknown"):
+        """Zentrale Funktion für Net-Position + Hedge Update"""
+        self._update_net_position()
+        
+        if abs(self.net_position_size) < 0.001:
+            return
+        
+        # Grid-Bounds holen
+        price_list = self.calculator.calculate_price_list()
+        lower_bound = price_list[0]
+        upper_bound = price_list[-1]
+        step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+
+        # Hedge-Preis berechnen
+        if self.grid_direction == "long":
+            hedge_price = lower_bound - step
+        elif self.grid_direction == "short":
+            hedge_price = upper_bound + step
+        else:
+            return
+
+        # PriceProtectScope validieren
+        live_price = getattr(self.hedge_manager, "live_price", None)
+        if live_price:
+            scope = self.hedge_manager.price_protect_scope or 0.05
+            min_price = live_price * (1 - scope)
+            max_price = live_price * (1 + scope)
+            
+            # ✅ NEU: Nur 1x warnen
+            out_of_scope = False
+            if self.grid_direction == "long" and hedge_price < min_price:
+                out_of_scope = True
+            elif self.grid_direction == "short" and hedge_price > max_price:
+                out_of_scope = True
+            
+            if out_of_scope:
+                # Nur loggen wenn noch nicht geloggt
+                last_warning = getattr(self, "_last_hedge_warning", None)
+                if last_warning != (hedge_price, trigger):
+                    self.logger.warning(
+                        f"[HEDGE] Preis {hedge_price:.4f} außerhalb PriceProtectScope "
+                        f"({min_price:.4f} - {max_price:.4f}) → Warte ({trigger})"
+                    )
+                    self._last_hedge_warning = (hedge_price, trigger)
+                return
+
+        # Hedge platzieren
+        self.hedge_manager.update_preemptive_hedge(
+            net_position_size=self.net_position_size,
+            dry_run=self.trading.dry_run,
+            lower_bound=lower_bound,
+            upper_bound=upper_bound,
+            step=step
+        )
+
+
+    def handle_order_fill(self, level: GridLevel):
+        """
+        Behandelt gefüllte Grid-Order
+        ✅ Markiert Position als OFFEN
+        ✅ Updated Hedge
+        ❌ Macht KEIN Rebuy (erst nach TP/SL-Close)
+        """
+        try:
+            # Position als offen markieren
+            level.filled = True
+            level.active = False
+            level.position_open = True  # ← NEU!
+            
+            self.logger.info(
+                f"🎯 Grid #{level.index} @ {level.price:.4f} FILLED "
+                f"→ Position OPEN (warte auf TP/SL)"
+            )
+            
+            # Hedge aktualisieren
+            self._update_and_hedge("order_filled")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Fill-Handler Fehler: {e}")
+
+    def handle_position_close(self, position_data: Dict[str, Any]):
+        """
+        Behandelt geschlossene Position (TP/SL getriggert)
+        ✅ Gibt Level für Rebuy frei
+        ✅ Platziert neue Order wenn active_rebuy=true
+        """
+        try:
+            entry_value = float(position_data.get("entryValue", 0))
+            
+            # Finde zugehöriges Level
+            matched_level = None
+            for lvl in self.levels:
+                if lvl.position_open and abs(lvl.price - entry_value) < 0.001:
+                    matched_level = lvl
+                    break
+            
+            if not matched_level:
+                self.logger.warning(
+                    f"⚠️ Keine offene Grid-Position für Entry {entry_value:.4f}"
+                )
+                return
+            
+            # Level freigeben
+            matched_level.position_open = False
+            matched_level.position_id = None
+            matched_level.filled = False
+            
+            self.logger.info(
+                f"✅ Grid #{matched_level.index} @ {matched_level.price:.4f} "
+                f"→ Position geschlossen, Level FREI"
+            )
+            
+            # Rebuy nur wenn aktiviert UND Level jetzt frei
+            if self.grid_conf.active_rebuy and not matched_level.position_open:
+                self.logger.info(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                time.sleep(0.1)  # Kurze Pause
+                self._place_entry(matched_level)
+            
+            # Hedge aktualisieren
+            self._update_and_hedge("position_closed")
+            
+        except Exception as e:
+            self.logger.error(f"❌ Position-Close Handler Fehler: {e}")
+
+    def handle_order_cancel(self, level: GridLevel):
+        """Wird von AccountSync aufgerufen wenn Order cancelled wird"""
+        level.active = False
+        level.order_id = None
+        
+        self.logger.info(f"🔴 Level #{level.index} cancelled @ {level.price}")
+        
+        self._update_and_hedge("order_cancelled")
 
 
     def handle_error(self, error: Exception):
@@ -376,7 +683,13 @@ class GridManager:
             self.logger.error(f"Resume-Fehler: {e}")
 
     def stop(self):
+        """Grid stoppen"""
         try:
+            # === NEU: Virtual Stats ausgeben ===
+            if self.trading.dry_run and self.virtual_manager:
+                self.logger.info("")  # Leerzeile
+                self.virtual_manager.print_stats()
+            
             self.lifecycle.set_state(GridState.CLOSED)
             self.logger.info(f"[{self.symbol}] Grid geschlossen")
         except ValueError as e:
@@ -396,10 +709,35 @@ class GridManager:
         self.logger.debug(f"[{self.symbol}] Cleanup")
 
     def print_grid_status(self):
+        """Loggt Grid-Status nur bei Änderungen"""
         total = len(self.levels)
         active = sum(1 for l in self.levels if l.active)
         filled = sum(1 for l in self.levels if l.filled)
-        self.logger.info(f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | Net: {self.net_position_size:.2f}")
+        hedge_status = "✅" if getattr(self.hedge_manager, "active", False) else "⏸️"
+        
+        # ✅ NEU: Nur bei Änderung loggen
+        current_state = (active, filled, self.net_position_size, hedge_status)
+        last_state = getattr(self, "_last_status_log", None)
+        
+        if current_state == last_state:
+            return  # Keine Änderung → Skip
+        
+        self._last_status_log = current_state
+        
+        # Virtual Stats
+        if self.trading.dry_run and self.virtual_manager:
+            stats = self.virtual_manager.get_stats()
+            self.logger.info(
+                f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | "
+                f"Net: {self.net_position_size:.2f} | Hedge: {hedge_status} | "
+                f"PnL: {stats['total_pnl']:+.2f} USDT ({stats['win_rate']:.0f}% WR)"
+            )
+        else:
+            self.logger.info(
+                f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | "
+                f"Net: {self.net_position_size:.2f} | Hedge: {hedge_status}"
+            )
+
 
     def log_summary(self) -> None:
         """Erweiterte Summary mit Risk-Info"""
@@ -418,8 +756,9 @@ class GridManager:
             f"({self.grid_conf.lower_price} → {self.grid_conf.upper_price})"
         )
         self.logger.info(f"Base Size  : {self.grid_conf.base_order_size}")
+        self.logger.info(f"Active Rebuy: {self.grid_conf.active_rebuy}")
         
-        # === Risk-Summary ===
+        # Risk-Summary
         try:
             risk_info = self.risk_manager.get_risk_summary()
             self.logger.info(f"Take Profit: {risk_info['tp_mode']}")

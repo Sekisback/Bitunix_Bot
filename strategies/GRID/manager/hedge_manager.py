@@ -224,7 +224,7 @@ class HedgeManager:
         
         ✅ FIX: Prüft jetzt alle None-Werte vor Berechnung
         """
-        self.logger.info(f"[HEDGE] 🔍 update_preemptive_hedge() aufgerufen: net={net_position_size:.2f}, dry_run={dry_run}")
+        # self.logger.info(f"[HEDGE] 🔍 update_preemptive_hedge() aufgerufen: net={net_position_size:.2f}, dry_run={dry_run}")
 
         if not getattr(self.config, "enabled", False):
             self.logger.warning("[HEDGE] ⚠️ Hedge nicht aktiviert (config.enabled=False)")
