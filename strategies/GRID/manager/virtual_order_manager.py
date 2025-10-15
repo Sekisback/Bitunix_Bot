@@ -283,24 +283,16 @@ class VirtualOrderManager:
             self.losing_trades += 1
             if position.pnl < self.worst_trade:
                 self.worst_trade = position.pnl
-        
-        # ✅ DEBUG: Stats nach Update ausgeben
-        self.logger.info(
-            f"[DEBUG] Stats nach Close: "
-            f"Trades={self.total_trades} | "
-            f"Total PnL={self.total_pnl:.2f} | "
-            f"W/L={self.winning_trades}/{self.losing_trades}"
-        )
-        
+              
         # Log mit Emoji
         emoji = "🎯" if reason == "TP" else "🛑"
         profit_emoji = "💰" if position.pnl > 0 else "📉"
         
-        self.logger.info(
-            f"[VIRTUAL] {emoji} {reason} @ {close_price:.4f} | "
-            f"{position.side} {position.qty} Entry={position.entry_price:.4f} | "
-            f"{profit_emoji} PnL: {position.pnl:+.2f} USDT ({position.pnl_pct:+.2f}%)"
-        )
+        # self.logger.info(
+        #     f"[VIRTUAL] {emoji} {reason} @ {close_price:.4f} | "
+        #     f"{position.side} {position.qty} Entry={position.entry_price:.4f} | "
+        #     f"{profit_emoji} PnL: {position.pnl:+.2f} USDT ({position.pnl_pct:+.2f}%)"
+        # )
     
     def cancel_order(self, order_id: str) -> bool:
         """Cancelt Order"""

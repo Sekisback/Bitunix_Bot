@@ -383,7 +383,7 @@ class GridManager:
                         )
                         
                         if self.grid_conf.active_rebuy:
-                            self.logger.info(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                            #self.logger.info(f"🔄 Rebuy @ {matched_level.price:.4f}")
                             self._place_entry(matched_level)
                         
                         self._update_and_hedge("position_closed")
@@ -515,10 +515,10 @@ class GridManager:
             tp_str = f"{tp:.4f}" if tp else "None"
             sl_str = f"{sl:.4f}" if sl else "None"
             
-            self.logger.info(
-                f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
-                f"size={size} | TP={tp_str} | SL={sl_str}"
-            )
+            # self.logger.info(
+            #     f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
+            #     f"size={size} | TP={tp_str} | SL={sl_str}"
+            # )
             return
 
         # Echte Order
@@ -666,7 +666,7 @@ class GridManager:
             )
             
             if self.grid_conf.active_rebuy and not matched_level.position_open:
-                self.logger.info(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                # self.logger.info(f"🔄 Rebuy @ {matched_level.price:.4f}")
                 time.sleep(0.1)
                 self._place_entry(matched_level)
             
