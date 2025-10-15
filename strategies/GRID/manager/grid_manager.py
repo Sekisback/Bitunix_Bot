@@ -145,14 +145,14 @@ class GridManager:
             if self.trading.dry_run:
                 from .virtual_order_manager import VirtualOrderManager
                 self.virtual_manager = VirtualOrderManager(self.symbol, self.logger)
-                self.logger.info("[VIRTUAL] 🎮 Dry-Run Mode mit Virtual Orders aktiv")
+                self.logger.info("[VIRTUAL]  Dry-Run Mode mit Virtual Orders aktiv")
             else:
                 self.virtual_manager = None
             # Flag für initiale Order-Platzierung
             self._initial_orders_placed = False
 
             # Warte auf ersten Preis!
-            self.logger.warning("[INIT] ⏳ Warte auf ersten Live-Preis vor Order-Platzierung...")
+            # self.logger.warning("[INIT] ⏳ Warte auf ersten Live-Preis vor Order-Platzierung...")
 
         except (InvalidGridConfigError, GridInitializationError) as e:
             self.lifecycle.set_state(GridState.ERROR, message=str(e))
@@ -254,7 +254,7 @@ class GridManager:
             
             self.levels.append(GridLevel(index=i, price=p, side=side))
         
-        self.logger.info(f"{len(self.levels)} GridLevel-Objekte erstellt ({self.grid_direction}).")
+        # self.logger.info(f"{len(self.levels)} GridLevel-Objekte erstellt ({self.grid_direction}).")
 
 
     def _maybe_rebalance(self) -> None:
@@ -279,7 +279,7 @@ class GridManager:
         #     return
         
         # Rebalancing durchführen
-        self.logger.info("♻️ Rebalancing...")
+        # self.logger.info("♻️ Rebalancing...")
         self.calculator.invalidate_cache()
         
         # ✅ ALLE alten Status merken (nicht nur active!)
@@ -326,10 +326,10 @@ class GridManager:
         
         # Status-Check nach Übertragung
         preserved = sum(1 for lvl in self.levels if lvl.filled or lvl.position_open)
-        self.logger.info(
-            f"✅ Rebalancing: {len(self.levels)} Levels | "
-            f"{preserved} Positionen übertragen"
-        )
+        # self.logger.info(
+        #     f"✅ Rebalancing: {len(self.levels)} Levels | "
+        #     f"{preserved} Positionen übertragen"
+        # )
 
     def update(self, current_price: float) -> None:
         """Hauptupdate pro Tick"""
@@ -574,16 +574,15 @@ class GridManager:
             level.active = True
             level.tp, level.sl = tp, sl
             
-            # Formatierung außerhalb des f-strings
-            tp_str = f"{tp:.4f}" if tp else "None"
-            sl_str = f"{sl:.4f}" if sl else "None"
+            # ✅ FIX: Nur bei DEBUG-Level loggen
+            if self.logger.isEnabledFor(logging.DEBUG):
+                tp_str = f"{tp:.4f}" if tp else "None"
+                sl_str = f"{sl:.4f}" if sl else "None"
+                self.logger.debug(
+                    f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
+                    f"size={size} | TP={tp_str} | SL={sl_str}"
+                )
             
-            self.logger.info(
-                f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
-                f"size={size} | TP={tp_str} | SL={sl_str}"
-            )
-            
-            # ✅ Hedge wird in update() geprüft - kein Aufruf hier!
             return
 
         # === ECHTE ORDER (Live Mode) ===
@@ -716,7 +715,7 @@ class GridManager:
             level.position_open = True  # ← NEU!
             
             self.logger.info(
-                f"🎯 Grid #{level.index} @ {level.price:.4f} FILLED "
+                f"[VIRTUAL] 🎯 Grid #{level.index} @ {level.price:.4f} FILLED "
                 f"→ Position OPEN (warte auf TP/SL)"
             )
             
@@ -900,7 +899,7 @@ class GridManager:
             f"({self.grid_conf.lower_price} → {self.grid_conf.upper_price})"
         )
         self.logger.info(f"Base Size  : {self.grid_conf.base_order_size}")
-        self.logger.info(f"Active Rebuy: {self.grid_conf.active_rebuy}")
+        self.logger.info(f"ActiveRebuy: {self.grid_conf.active_rebuy}")
         
         # Risk-Summary
         try:
@@ -927,17 +926,29 @@ class GridManager:
     async def sync_orders(self, dry_run=None):
         if dry_run is None:
             dry_run = self.trading.dry_run
-        self.logger.info(f"[{self.symbol}] OrderSync {'Dry-Run' if dry_run else 'Real'}")
+        
+        # ✅ FIX: Nur bei manueller Ausführung oder wichtigen Events
+        self.logger.debug(f"[{self.symbol}] OrderSync {'Dry-Run' if dry_run else 'Real'}")
+        
         async with self._levels_lock:
             result = await self.order_sync.sync_orders(dry_run=dry_run)
-        self.logger.info(f"[{self.symbol}] Sync: {result}")
+        
+        # ✅ FIX: Nur loggen wenn was passiert ist
+        if result.get('placed', 0) > 0 or result.get('cancelled', 0) > 0:
+            self.logger.info(
+                f"[{self.symbol}] Sync: PLACED={result.get('placed', 0)} | "
+                f"CANCELLED={result.get('cancelled', 0)}"
+            )
+        else:
+            self.logger.debug(f"[{self.symbol}] Sync: {result}")
+        
         return result
 
     def attach_account_sync(self, account_sync):
         self.account_sync = account_sync
         account_sync.grid_manager = self
         self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
-        self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
+        # self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
 
     def setup_margin(self):
         if self.trading.dry_run:

@@ -68,7 +68,7 @@ class GridCalculator:
         self._cached_prices = prices
         self._cache_hash = current_hash
         
-        self.logger.info(f"Preisraster berechnet: {len(prices)} Levels ({mode.value})")
+        # self.logger.info(f"Preisraster berechnet: {len(prices)} Levels ({mode.value})")
         return prices
 
     def _arithmetic_grid(self, lower: float, upper: float, n: int) -> List[float]:

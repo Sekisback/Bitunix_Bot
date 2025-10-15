@@ -12,7 +12,7 @@ FIXES:
 
 import logging
 import time
-
+from utils.exceptions import OrderPlacementError, InsufficientBalanceError
 
 class HedgeManager:
     def __init__(self, config, api_client, symbol, logger=None, dry_run=False, client_pub=None):
@@ -175,10 +175,8 @@ class HedgeManager:
             )
             return
 
-        self.logger.info(f"[HEDGE] 🚀 {side} {size} {self.symbol} @ {price:.6f}")
-
         if self.dry_run:
-            self.logger.debug("[HEDGE] (Dry-Run aktiv – keine echte Order)")
+            self.logger.debug(f"[HEDGE] (Dry) place_order() @ {price:.6f}")
             return
 
         try:
@@ -285,12 +283,17 @@ class HedgeManager:
         
         target_qty = risk_count * base_size
         
-        self.logger.info(
-            f"[HEDGE] 📊 @ {current_price:.4f}: "
-            f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
-            f"Filled ohne TP={len(filled_without_tp)} | "
-            f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
-        )
+        last_logged_state = getattr(self, "_last_hedge_log", None)
+        current_state = (risk_count, target_qty)
+
+        if current_state != last_logged_state:
+            self._last_hedge_log = current_state
+            self.logger.info(
+                f"[HEDGE] 📊 @ {current_price:.4f}: "
+                f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
+                f"Filled ohne TP={len(filled_without_tp)} | "
+                f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
+            )
         
         # Kein Risiko → Hedge schließen
         if target_qty < 0.001:
@@ -333,7 +336,7 @@ class HedgeManager:
         if not hedge_price or hedge_price <= 0:
             return
         
-        self.logger.info(f"[HEDGE] 🚀 {hedge_side} {target_qty:.2f} @ {hedge_price:.6f}")
+        #self.logger.info(f"[HEDGE] 🚀 {hedge_side} {target_qty:.2f} @ {hedge_price:.6f}")
         
         if dry_run:
             self.active = True

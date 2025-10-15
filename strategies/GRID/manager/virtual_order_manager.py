@@ -100,7 +100,7 @@ class VirtualOrderManager:
         self.best_trade = 0.0
         self.worst_trade = 0.0
         
-        self.logger.info(f"[VIRTUAL] VirtualOrderManager für {symbol} initialisiert")
+        self.logger.info(f"[VIRTUAL]  VirtualOrderManager für {symbol} initialisiert")
     
     def place_order(self, side: str, order_type: str, qty: float, price: float, tp_price: Optional[float] = None, sl_price: Optional[float] = None, client_id: Optional[str] = None) -> str:
         """

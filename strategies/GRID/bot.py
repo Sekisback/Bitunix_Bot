@@ -120,7 +120,7 @@ class GridBot:
                         if hedge_active:
                             hedge_price = getattr(self.grid.hedge_manager, "current_hedge_price", None)
                             hedge_qty = getattr(self.grid.hedge_manager, "current_hedge_size", 0)
-                            hedge_str = f"🛡️ @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️"
+                            hedge_str = f"🛡️  @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️"
                         else:
                             hedge_str = "⏸️"
                         
@@ -137,7 +137,7 @@ class GridBot:
                         logger.info(
                             f"💰 {self.symbol} @ {last_price:.4f} | "
                             f"Active: {active}/{total} | Filled: {filled} | "
-                            f"Net: {net_pos:.2f} | Hedge: {hedge_str} | "
+                            # f"Net: {net_pos:.2f} | Hedge: {hedge_str} | "
                             f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
                         )
                         
@@ -242,13 +242,21 @@ class GridBot:
             logger.info("✅ Bot beendet")
 
     async def _auto_sync_check(self):
-        """Periodischer OrderSync"""
         try:
             result = await self.grid.sync_orders()
-            logger.info(
-                f"🔍 Auto-Sync: MATCHED={result['matched']} | "
-                f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
-            )
+            
+            # ✅ FIX: Nur loggen wenn was passiert ist
+            if result.get('placed', 0) > 0 or result.get('cancelled', 0) > 0:
+                logger.info(
+                    f"🔍 Auto-Sync: MATCHED={result['matched']} | "
+                    f"MISSING={result['missing']} | OBSOLETE={result['obsolete']} | "
+                    f"PLACED={result.get('placed', 0)} | CANCELLED={result.get('cancelled', 0)}"
+                )
+            else:
+                logger.debug(
+                    f"Auto-Sync: MATCHED={result['matched']} | "
+                    f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
+                )
             
             # === Hedge nach Sync aktualisieren (falls Orders nachträglich platziert wurden) ===
             if result['placed'] > 0:
@@ -338,7 +346,6 @@ async def main():
     # ========================================
     try:
         bot = GridBot(config, client_pri, client_pub)
-        logger.info(f"✅ GridBot für {symbol} erstellt")
         
     except GridInitializationError as e:
         logger.error(f"❌ Grid-Initialisierung fehlgeschlagen: {e}")
@@ -359,8 +366,6 @@ async def main():
         except Exception as e:
             logger.error(f"❌ Margin-Setup fehlgeschlagen: {e}")
             logger.warning("Fahre trotzdem fort...")
-    else:
-        logger.info("🎮 Dry-Run Mode → Margin-Setup übersprungen")
 
     # ========================================
     # 7. OrderSync (optional)
@@ -381,10 +386,6 @@ async def main():
     # ========================================
     # 8. Bot starten
     # ========================================
-    logger.info("=" * 60)
-    logger.info(f"🚀 Starte Bot für {symbol}")
-    logger.info(f"Mode: {'🎮 DRY-RUN' if config.trading.dry_run else '⚠️ LIVE'}")
-    logger.info("=" * 60)
     
     try:
         await bot.run()
