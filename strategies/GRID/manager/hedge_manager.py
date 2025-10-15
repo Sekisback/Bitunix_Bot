@@ -73,7 +73,7 @@ class HedgeManager:
 
 
     # ----------------------------------------------------------------
-    def check_trigger(self, price: float, lower_bound: float, upper_bound: float, step: float):
+    def check_trigger(self, price: float, lower_bound: float, upper_bound: float, step: float, net_position: float = 0):
         """Prüft, ob der Preis die Grid-Range verlässt oder wieder eintritt."""
         if not getattr(self.config, "enabled", False):
             return
@@ -86,17 +86,17 @@ class HedgeManager:
 
         if price <= lower_trigger_price:
             self.logger.debug(f"[HEDGE] 📉 Trigger unterhalb Range @ {price:.4f}")
-            self.trigger("below", price, step, lower_bound, upper_bound)
+            self.trigger("below", price, step, lower_bound, upper_bound, net_position=net_position)
 
         elif price >= upper_trigger_price:
             self.logger.debug(f"[HEDGE] 📈 Trigger oberhalb Range @ {price:.4f}")
-            self.trigger("above", price, step, lower_bound, upper_bound)
+            self.trigger("above", price, step, lower_bound, upper_bound, net_position=net_position)
 
         elif self.active and getattr(self.config, "close_on_reentry", False) and lower_bound <= price <= upper_bound:
             self.close()
 
     # ----------------------------------------------------------------
-    def trigger(self, direction: str, price: float, step: float, lower_bound: float, upper_bound: float):
+    def trigger(self, direction: str, price: float, step: float, lower_bound: float, upper_bound: float, net_position: float = 0):
         """Startet Hedge je nach Modus (direct, dynamic, reversal)."""
         if self.active:
             return
@@ -115,22 +115,19 @@ class HedgeManager:
         else:
             return
 
-        self.logger.info(f"[HEDGE] ⚡ Hedge {hedge_side} @ {hedge_price:.4f}")
-
-        # ✅ FIX: net_position an get_size() übergeben
-        net_pos = getattr(self, "current_net_position", 0)
+        self.logger.info(f"[HEDGE] ⚡ Hedge {hedge_side} @ {hedge_price:.4f} | Net={net_position:.2f}")
 
         if mode == "direct":
-            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_pos))
+            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_position))
 
         elif mode == "dynamic":
             partials = getattr(self.config, "partial_levels", [0.5, 0.75, 1.0])
             for lvl in partials:
                 offset_price = hedge_price - (step * lvl) if hedge_side == "SELL" else hedge_price + (step * lvl)
-                self.place_order(hedge_side, offset_price, self.get_size(net_position=net_pos, fraction=lvl))
+                self.place_order(hedge_side, offset_price, self.get_size(net_position=net_position, fraction=lvl))
 
         elif mode == "reversal":
-            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_pos, multiplier=2.0))
+            self.place_order(hedge_side, hedge_price, self.get_size(net_position=net_position, multiplier=2.0))
 
         self.active = True
 
@@ -157,7 +154,6 @@ class HedgeManager:
             self.logger.warning("[HEDGE] ❌ Ungültige Hedge-Größe (0)")
             return
 
-        # ✅ FIX: Früher prüfen ob live_price existiert
         if not self.live_price:
             self.logger.warning("[HEDGE] ⚠️ Kein Live-Preis verfügbar → Order übersprungen")
             return
@@ -197,8 +193,20 @@ class HedgeManager:
             )
             self.logger.info(f"[HEDGE] ✅ Hedge-Order platziert → ID={order_id}")
             self.active = True
+        
+        # ✅ FIX: Spezifisches Error-Handling
+        except OrderPlacementError as e:
+            self.logger.error(f"[HEDGE] ❌ Order-Placement-Fehler: {e}")
+            raise  # Nach oben durchreichen
+        
+        except InsufficientBalanceError as e:
+            self.logger.error(f"[HEDGE] ❌ Zu wenig Balance: {e}")
+            # Nicht fatal - Hedge überspringen
+            return
+        
         except Exception as e:
-            self.logger.error(f"[HEDGE] ❌ Fehler beim Platzieren der Hedge-Order: {e}")
+            self.logger.exception(f"[HEDGE] ❌ Unerwarteter Fehler beim Platzieren: {e}")
+            # Logging aber nicht crashen
 
     # ----------------------------------------------------------------
     def close(self):

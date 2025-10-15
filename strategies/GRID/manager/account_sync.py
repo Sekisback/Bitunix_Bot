@@ -213,13 +213,21 @@ class AccountSync:
         elif channel == "position":
             self._update_position_ws(data.get("data", {}))
 
-    def sync(self, ws_enabled: bool = True):
-        """Periodischer Abgleich mit Balance-Doppelabfrage-Fix"""
+    def sync(self, ws_enabled: bool = True, force: bool = False):
+        """Periodischer Abgleich mit Throttling"""
+        now = time.time()
+        
+        # ✅ FIX: Throttling - nur alle X Sekunden aufrufen
+        if not force and (now - getattr(self, "_last_sync_call", 0)) < 5:
+            return self.balance
+        
+        self._last_sync_call = now
+        
         if ws_enabled and self.ws_connected:
             self.logger.debug(f"Balance: {self.balance:.2f} {self.balance_coin}")
             return self.balance
 
-        now = time.time()
+        # HTTP Fallback mit Intervall-Check
         if not self.ws_connected and (now - self.last_sync >= BALANCE_SYNC_INTERVAL):
             self.logger.debug("WS nicht verbunden → HTTP Balance")
             self._update_balance_http()

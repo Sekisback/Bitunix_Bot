@@ -36,11 +36,24 @@ def setup_logging(symbol: str, strategy: str = "GRID", debug: bool = False):
             
             # Debug-Modus: Setze alle Logger auf DEBUG
             if debug:
-                for logger_name in config.get('loggers', {}).keys():
-                    config['loggers'][logger_name]['level'] = 'DEBUG'
-                config['root']['level'] = 'DEBUG'
+                # Nur relevante Logger auf DEBUG
+                debug_loggers = [
+                    'GridManager', 'HedgeManager', 'OrderSync', 
+                    'AccountSync', 'VirtualOrderManager'
+                ]
+                
+                for logger_name in debug_loggers:
+                    if logger_name in config.get('loggers', {}):
+                        config['loggers'][logger_name]['level'] = 'DEBUG'
+                
+                # Root auf INFO (nicht DEBUG!)
+                config['root']['level'] = 'INFO'
+                
+                # Console auf DEBUG
                 if 'handlers' in config and 'console' in config['handlers']:
                     config['handlers']['console']['level'] = 'DEBUG'
+                
+                logging.info("🔍 Debug-Modus aktiv für: " + ", ".join(debug_loggers))
             
             # Konfiguration anwenden
             logging.config.dictConfig(config)

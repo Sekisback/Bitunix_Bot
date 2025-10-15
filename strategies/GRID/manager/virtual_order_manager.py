@@ -54,7 +54,7 @@ class VirtualPosition:
     position_id: str
     symbol: str
     side: str  # LONG, SHORT
-    entry_price: float
+    entry_price: float  # Grid-Preis (für Level-Matching)
     qty: float
     tp_price: Optional[float] = None
     sl_price: Optional[float] = None
@@ -63,19 +63,22 @@ class VirtualPosition:
     close_price: Optional[float] = None
     pnl: Optional[float] = None
     pnl_pct: Optional[float] = None
+    fill_price: Optional[float] = None  # ← NEU: Tatsächlicher Fill-Preis für PnL
     
     def calculate_pnl(self, close_price: float):
-        """Berechnet PnL"""
+        """Berechnet PnL basierend auf Fill-Preis"""
+        # ✅ FIX: PnL mit Fill-Preis berechnen, nicht Grid-Preis
+        actual_entry = self.fill_price if self.fill_price else self.entry_price
+        
         if self.side == "LONG":
-            self.pnl = (close_price - self.entry_price) * self.qty
-            self.pnl_pct = ((close_price - self.entry_price) / self.entry_price) * 100
+            self.pnl = (close_price - actual_entry) * self.qty
+            self.pnl_pct = ((close_price - actual_entry) / actual_entry) * 100
         else:  # SHORT
-            self.pnl = (self.entry_price - close_price) * self.qty
-            self.pnl_pct = ((self.entry_price - close_price) / self.entry_price) * 100
+            self.pnl = (actual_entry - close_price) * self.qty
+            self.pnl_pct = ((actual_entry - close_price) / actual_entry) * 100
         
         self.close_price = close_price
         self.closed_at = time.time()
-
 
 class VirtualOrderManager:
     """Verwaltet virtuelle Orders und Positionen im Dry-Run"""
@@ -192,20 +195,24 @@ class VirtualOrderManager:
         """Erstellt Position aus gefüllter Order"""
         position_id = f"pos_{order.order_id}"
         
+        # ✅ FIX: Grid-Preis speichern für korrektes Level-Matching
         position = VirtualPosition(
             position_id=position_id,
             symbol=self.symbol,
             side="LONG" if order.side == "BUY" else "SHORT",
-            entry_price=fill_price,
+            entry_price=order.price,  # ← Grid-Preis (Original Order-Preis)
             qty=order.qty,
             tp_price=order.tp_price,
             sl_price=order.sl_price
         )
         
+        # Fill-Preis für PnL-Berechnung merken
+        position.fill_price = fill_price
+        
         self.positions[position_id] = position
         
         self.logger.debug(
-            f"[VIRTUAL] 📍 Position eröffnet: {position.side} {position.qty} @ {fill_price:.4f}"
+            f"[VIRTUAL] 📍 Position eröffnet: {position.side} {position.qty} @ Grid={order.price:.4f} Fill={fill_price:.4f}"
         )
     
     def check_tp_sl(self, current_price: float) -> List[VirtualPosition]:

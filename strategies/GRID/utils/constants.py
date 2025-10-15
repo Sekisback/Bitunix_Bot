@@ -5,39 +5,52 @@ Ersetzt Magic Numbers im Code
 """
 
 # === Toleranzen ===
-PRICE_TOLERANCE = 1e-8  # Toleranz für Preisvergleiche (Float-Genauigkeit)
+PRICE_TOLERANCE = 1e-8
+FILL_PRICE_TOLERANCE = 0.01  # ← NEU: 1 Cent für Fill-Matching
 
 # === WebSocket ===
-WS_HEARTBEAT_INTERVAL = 3  # Sekunden zwischen Ping-Messages
-WS_RECONNECT_DELAY = 5     # Sekunden Wartezeit nach Disconnect
+WS_HEARTBEAT_INTERVAL = 3
+WS_RECONNECT_DELAY = 5
+WS_MAX_RECONNECT_ATTEMPTS = 5  # ← NEU
 
 # === Account Sync ===
-BALANCE_SYNC_INTERVAL = 60      # Sekunden zwischen HTTP-Balance-Abfragen
-ORDER_CACHE_STALE_SECONDS = 300 # Orders älter als 5min = stale
+BALANCE_SYNC_INTERVAL = 60
+BALANCE_SYNC_THROTTLE = 5  # ← NEU: Min. Sekunden zwischen sync() Calls
+ORDER_CACHE_STALE_SECONDS = 300
 
 # === Bot Timing ===
-AUTO_SYNC_CHECK_INTERVAL = 600  # 10 Minuten zwischen Auto-OrderSync
-MAIN_LOOP_SLEEP_SECONDS = 2     # Standard-Sleep im Bot-Loop
-WS_STARTUP_DELAY = 2            # Wartezeit nach WS-Connect vor Subscribe
+AUTO_SYNC_CHECK_INTERVAL = 600
+MAIN_LOOP_SLEEP_SECONDS = 2
+WS_STARTUP_DELAY = 2
 
 # === Grid Defaults ===
 DEFAULT_GRID_LEVELS = 10
 MIN_GRID_LEVELS = 2
 MAX_GRID_LEVELS = 100
 
-DEFAULT_REBALANCE_INTERVAL = 300  # 5 Minuten
-MIN_REBALANCE_INTERVAL = 60       # 1 Minute
-MAX_REBALANCE_INTERVAL = 3600     # 1 Stunde
+DEFAULT_REBALANCE_INTERVAL = 300
+MIN_REBALANCE_INTERVAL = 60
+MAX_REBALANCE_INTERVAL = 3600
 
 # === Risk Management ===
-DEFAULT_MAKER_FEE = 0.00014  # 0.014%
-DEFAULT_TAKER_FEE = 0.00014  # 0.014%
-MIN_ORDER_SIZE = 0.0         # Minimale Ordergröße (Exchange-abhängig)
+DEFAULT_MAKER_FEE = 0.00014
+DEFAULT_TAKER_FEE = 0.00014
+MIN_ORDER_SIZE = 0.0
 
 # === Retry & Error Handling ===
 MAX_RECONNECT_ATTEMPTS = 5
-ERROR_RETRY_INTERVAL = 30    # Sekunden bis Retry nach Fehler
+ERROR_RETRY_INTERVAL = 30
 
 # === Logging ===
 LOG_ROTATION_SIZE_MB = 10
 LOG_ROTATION_BACKUP_COUNT = 5
+
+# === Hedge (NEU!) ===
+HEDGE_MIN_SIZE = 0.001
+HEDGE_PRICE_TOLERANCE = 0.0001
+HEDGE_CHECK_INTERVAL = 10  # Sekunden zwischen Hedge-Checks
+HEDGE_MAX_TRIGGER_OFFSET = 10.0
+HEDGE_MIN_TRIGGER_OFFSET = 0.1
+
+# === Grid Placement (NEU!) ===
+GRID_ORDER_MIN_DISTANCE_STEPS = 1  # Mindestabstand in Grid-Steps

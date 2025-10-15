@@ -30,23 +30,8 @@ handlers:
     encoding: utf8
 
 loggers:
-  # Bot-spezifische Logger
+  # === Bot-Hauptlogik (immer sichtbar) ===
   GridManager:
-    level: INFO
-    handlers: [console, file]
-    propagate: false
-  
-  OrderSync:
-    level: INFO
-    handlers: [console, file]
-    propagate: false
-  
-  AccountSync:
-    level: INFO
-    handlers: [console, file]
-    propagate: false
-  
-  GridLifecycle:
     level: INFO
     handlers: [console, file]
     propagate: false
@@ -56,9 +41,45 @@ loggers:
     handlers: [console, file]
     propagate: false
   
-  # Core Module (leiser)
+  # === Manager (nur Warnungen in Prod) ===
+  OrderSync:
+    level: WARNING  # ← NEU: weniger Spam
+    handlers: [console, file]
+    propagate: false
+  
+  AccountSync:
+    level: WARNING  # ← NEU
+    handlers: [console, file]
+    propagate: false
+  
+  GridLifecycle:
+    level: WARNING  # ← NEU
+    handlers: [console, file]
+    propagate: false
+  
+  HedgeManager:
+    level: INFO  # Hedge ist wichtig
+    handlers: [console, file]
+    propagate: false
+  
+  RiskManager:
+    level: WARNING  # ← NEU
+    handlers: [console, file]
+    propagate: false
+  
+  GridCalculator:
+    level: WARNING  # ← NEU
+    handlers: [console, file]
+    propagate: false
+  
+  VirtualOrderManager:
+    level: INFO  # Dry-Run wichtig
+    handlers: [console, file]
+    propagate: false
+  
+  # === Core Module (sehr leise) ===
   core:
-    level: WARNING
+    level: ERROR  # ← Noch stiller
     handlers: [file]
     propagate: false
   
@@ -73,5 +94,5 @@ loggers:
     propagate: false
 
 root:
-  level: INFO
+  level: WARNING  # ← NEU: Default WARNING
   handlers: [console, file]

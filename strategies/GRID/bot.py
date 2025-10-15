@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """GRID Trading Bot mit Error Handling"""
 
+#!/usr/bin/env python3
+"""GRID Trading Bot mit Error Handling"""
+
 import argparse
 import asyncio
 import logging
@@ -15,21 +18,15 @@ sys.path.insert(0, str(root_dir))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.constants import AUTO_SYNC_CHECK_INTERVAL, WS_STARTUP_DELAY, MAIN_LOOP_SLEEP_SECONDS
-from utils.exceptions import (
-    ConfigValidationError, GridInitializationError, 
-    OrderSyncError, WebSocketConnectionError
-)
-
+from utils.exceptions import (ConfigValidationError, GridInitializationError, OrderSyncError, WebSocketConnectionError)
 from core.config import Config
 from core.open_api_http_future_private import OpenApiHttpFuturePrivate
 from core.open_api_http_future_public import OpenApiHttpFuturePublic
 from core.open_api_ws_future_public import OpenApiWsFuturePublic
 from core.open_api_ws_future_private import OpenApiWsFuturePrivate
-
 from manager.grid_manager import GridManager
 from manager.grid_lifecycle import GridState
 from manager.account_sync import AccountSync
-
 from utils.config_loader import load_config
 from utils.logging_setup import setup_logging
 
@@ -39,7 +36,6 @@ for name in ["core.open_api_ws_future_public", "core.open_api_ws_future_private"
     logging.getLogger(name).setLevel(logging.ERROR)
 
 logger = logging.getLogger("GRID-BOT")
-
 
 class GridBot:
     """GRID Bot mit Exception Handling"""
@@ -275,54 +271,133 @@ class GridBot:
 
 
 async def main():
+    """Hauptfunktion mit strukturiertem Error-Handling"""
+    
+    # ========================================
+    # 1. Argumente parsen
+    # ========================================
     parser = argparse.ArgumentParser(
         description="Bitunix GRID Trading Bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Beispiel: python strategies/GRID/bot.py --config ONDOUSDT",
     )
-    parser.add_argument("--config", required=True, help="Coin Config")
-    parser.add_argument("--sync", action="store_true", help="OrderSync Dry-Run")
+    parser.add_argument("--config", required=True, help="Coin Config (z.B. ONDOUSDT)")
+    parser.add_argument("--sync", action="store_true", help="OrderSync Dry-Run ausführen")
     args = parser.parse_args()
 
+    # ========================================
+    # 2. Config laden
+    # ========================================
     try:
         strategy_dir = Path(__file__).parent
         os.chdir(strategy_dir)
         config = load_config(args.config)
         os.chdir(root_dir)
+        
     except ConfigValidationError as e:
+        print(f"❌ Config-Validierung fehlgeschlagen:\n{e}")
+        sys.exit(1)
+        
+    except FileNotFoundError:
+        print(f"❌ Config-Datei nicht gefunden: configs/{args.config}.yaml")
+        print(f"Verfügbare Configs: {list(Path('configs').glob('*.yaml'))}")
+        sys.exit(1)
+        
+    except Exception as e:
+        print(f"❌ Unerwarteter Fehler beim Config-Laden: {e}")
+        import traceback
+        traceback.print_exc()
         sys.exit(1)
 
     symbol = config.symbol
 
+    # ========================================
+    # 3. Logging initialisieren
+    # ========================================
     try:
         setup_logging(symbol=symbol, strategy="GRID", debug=config.system.debug)
+        logger.info(f"📝 Logging initialisiert für {symbol}")
     except Exception as e:
-        print(f"⚠️ Logging-Setup error: {e}")
+        print(f"⚠️ Logging-Setup fehlgeschlagen: {e}")
+        print("Fahre ohne vollständiges Logging fort...")
 
-    cfg = Config()
-    client_pri = OpenApiHttpFuturePrivate(cfg)
-    client_pub = OpenApiHttpFuturePublic(cfg)
-
+    # ========================================
+    # 4. API-Clients erstellen
+    # ========================================
     try:
-        bot = GridBot(config, client_pri, client_pub)
-    except GridInitializationError as e:
-        logger.error(f"❌ Grid-Init fehlgeschlagen: {e}")
+        cfg = Config()
+        client_pri = OpenApiHttpFuturePrivate(cfg)
+        client_pub = OpenApiHttpFuturePublic(cfg)
+        logger.info("✅ API-Clients erstellt")
+    except Exception as e:
+        logger.error(f"❌ API-Client-Initialisierung fehlgeschlagen: {e}")
         sys.exit(1)
 
-    # Margin Mode & Leverage Setup
-    bot.grid.setup_margin()
-    
+    # ========================================
+    # 5. GridBot erstellen
+    # ========================================
+    try:
+        bot = GridBot(config, client_pri, client_pub)
+        logger.info(f"✅ GridBot für {symbol} erstellt")
+        
+    except GridInitializationError as e:
+        logger.error(f"❌ Grid-Initialisierung fehlgeschlagen: {e}")
+        sys.exit(1)
+        
+    except Exception as e:
+        logger.exception(f"❌ Unerwarteter Fehler bei GridBot-Erstellung: {e}")
+        sys.exit(1)
+
+    # ========================================
+    # 6. Margin & Leverage Setup
+    # ========================================
+    if not config.trading.dry_run:
+        try:
+            logger.info(f"⚙️ Margin-Setup: {config.margin.mode} | Hebel: {config.margin.leverage}x")
+            bot.grid.setup_margin()
+            logger.info("✅ Margin-Setup abgeschlossen")
+        except Exception as e:
+            logger.error(f"❌ Margin-Setup fehlgeschlagen: {e}")
+            logger.warning("Fahre trotzdem fort...")
+    else:
+        logger.info("🎮 Dry-Run Mode → Margin-Setup übersprungen")
+
+    # ========================================
+    # 7. OrderSync (optional)
+    # ========================================
     if args.sync:
-        print("\n🔍 OrderSync-DryRun...")
+        logger.info("\n🔍 OrderSync Dry-Run...")
         try:
             result = await bot.grid.sync_orders()
-            print(f"✅ Sync: {result}")
+            logger.info(f"✅ Sync-Ergebnis: {result}")
+            print(f"\n✅ OrderSync abgeschlossen: {result}")
+            
         except OrderSyncError as e:
-            print(f"❌ Sync error: {e}")
-        return
-    
-    await bot.run()
+            logger.error(f"❌ OrderSync fehlgeschlagen: {e}")
+            print(f"❌ OrderSync Error: {e}")
+            
+        return  # Beende nach Sync
 
+    # ========================================
+    # 8. Bot starten
+    # ========================================
+    logger.info("=" * 60)
+    logger.info(f"🚀 Starte Bot für {symbol}")
+    logger.info(f"Mode: {'🎮 DRY-RUN' if config.trading.dry_run else '⚠️ LIVE'}")
+    logger.info("=" * 60)
+    
+    try:
+        await bot.run()
+        
+    except KeyboardInterrupt:
+        logger.info("\n🛑 Bot durch Benutzer gestoppt")
+        
+    except Exception as e:
+        logger.exception(f"❌ Bot-Laufzeitfehler: {e}")
+        sys.exit(1)
+        
+    finally:
+        logger.info("✅ Bot beendet")
 
 if __name__ == "__main__":
     try:

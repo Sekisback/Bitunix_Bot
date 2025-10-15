@@ -1,10 +1,12 @@
-# strategies/GRID/models/config_models.py (KORRIGIERT)
+# strategies/GRID/models/config_models.py
 """
 Pydantic Config Models mit Hedge-Validierung
 
 FIXES:
 - ✅ HedgeConfig hat jetzt model_validator
 - ✅ Validierung von trigger_offset, partial_levels, fixed_size_ratio
+- ✅ Encoding UTF-8
+- ✅ Validator in GridBotConfig korrigiert
 """
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal, Optional
@@ -88,11 +90,43 @@ class GridConfig(BaseModel):
 
     @model_validator(mode="after")
     def cross_check_prices(self):
-        """Basisprüfung: upper_price > lower_price"""
+        """Erweiterte Grid-Validierung"""
+        
+        # 1️⃣ Basisprüfung
         if self.upper_price <= self.lower_price:
             raise ValueError(
                 f"upper_price ({self.upper_price}) muss größer als lower_price ({self.lower_price}) sein"
             )
+        
+        # 2️⃣ Mindestabstand zwischen upper/lower
+        price_range = self.upper_price - self.lower_price
+        if price_range < self.min_price_step * 10:
+            raise ValueError(
+                f"Preisbereich ({price_range}) zu klein für {self.grid_levels} Levels "
+                f"(min: {self.min_price_step * 10})"
+            )
+        
+        # 3️⃣ Sinnvolle TP/SL Prozentsätze
+        if self.tp_mode == TPMode.PERCENT:
+            if self.take_profit_pct < 0.001:  # < 0.1%
+                import warnings
+                warnings.warn(f"⚠️ take_profit_pct={self.take_profit_pct*100:.2f}% sehr niedrig")
+            if self.take_profit_pct > 0.1:  # > 10%
+                raise ValueError(f"take_profit_pct={self.take_profit_pct*100:.1f}% unrealistisch hoch (max: 10%)")
+        
+        if self.sl_mode == SLMode.PERCENT:
+            if self.stop_loss_pct < 0.005:  # < 0.5%
+                import warnings
+                warnings.warn(f"⚠️ stop_loss_pct={self.stop_loss_pct*100:.2f}% sehr eng")
+            if self.stop_loss_pct > 0.5:  # > 50%
+                raise ValueError(f"stop_loss_pct={self.stop_loss_pct*100:.1f}% unrealistisch hoch (max: 50%)")
+        
+        # 4️⃣ Rebalance-Intervall sinnvoll?
+        if self.rebalance_interval < 60:
+            raise ValueError(
+                f"rebalance_interval={self.rebalance_interval}s zu kurz (min: 60s)"
+            )
+        
         return self
 
 
@@ -117,25 +151,22 @@ class HedgeConfig(BaseModel):
     """
     enabled: bool = False
     preemptive_hedge: bool = False
-    mode: Literal["direct", "dynamic", "reversal"] = "direct"  # ✅ Literal statt str
+    mode: Literal["direct", "dynamic", "reversal"] = "direct"
     trigger_offset: float = Field(default=1.0, gt=0, description="Muss > 0 sein")
     partial_levels: List[float] = [0.5, 0.75, 1.0]
     close_on_reentry: bool = True
-    size_mode: Literal["net_position", "fixed"] = "net_position"  # ✅ Literal statt str
+    size_mode: Literal["net_position", "fixed"] = "net_position"
     fixed_size_ratio: float = Field(default=0.5, gt=0, le=1, description="Zwischen 0 und 1")
 
     @model_validator(mode='after')
     def validate_hedge_logic(self):
-        """
-        Prüft Hedge-spezifische Regeln
+        """Prüft Hedge-spezifische Regeln"""
         
-        ✅ FIX: Vollständige Validierung
-        """
         # 1️⃣ Dynamic-Mode braucht partial_levels
         if self.mode == "dynamic" and not self.partial_levels:
             raise ValueError("mode='dynamic' benötigt partial_levels")
         
-        # 2️⃣ Prüfe partial_levels Werte (falls vorhanden)
+        # 2️⃣ Prüfe partial_levels Werte
         if self.partial_levels:
             for i, lvl in enumerate(self.partial_levels):
                 if not (0 < lvl <= 1):
@@ -143,7 +174,7 @@ class HedgeConfig(BaseModel):
                         f"partial_levels[{i}] = {lvl} ist ungültig (muss zwischen 0 und 1 liegen)"
                     )
             
-            # 3️⃣ Sortiere partial_levels aufsteigend
+            # Sortiere partial_levels
             if self.partial_levels != sorted(self.partial_levels):
                 import warnings
                 warnings.warn(
@@ -151,16 +182,37 @@ class HedgeConfig(BaseModel):
                 )
                 self.partial_levels = sorted(self.partial_levels)
         
-        # 4️⃣ Warnung bei unrealistischen Werten
-        if self.trigger_offset > 5:
-            import warnings
-            warnings.warn(
-                f"⚠️ trigger_offset={self.trigger_offset} sehr hoch (normal: 1-3)"
+        # 3️⃣ trigger_offset Grenzen
+        if self.trigger_offset > 10:
+            raise ValueError(
+                f"trigger_offset={self.trigger_offset} zu hoch (max: 10, empfohlen: 1-3)"
             )
         
-        # 5️⃣ size_mode=fixed braucht sinnvollen fixed_size_ratio
-        if self.size_mode == "fixed" and self.fixed_size_ratio == 0:
-            raise ValueError("size_mode='fixed' mit fixed_size_ratio=0 ist sinnlos")
+        if self.trigger_offset < 0.1:
+            raise ValueError(
+                f"trigger_offset={self.trigger_offset} zu niedrig (min: 0.1)"
+            )
+        
+        # 4️⃣ size_mode Validierung
+        if self.size_mode == "fixed":
+            if self.fixed_size_ratio <= 0 or self.fixed_size_ratio > 2:
+                raise ValueError(
+                    f"fixed_size_ratio={self.fixed_size_ratio} ungültig (muss 0 < x <= 2 sein)"
+                )
+        
+        # 5️⃣ Reversal-Mode Warnung
+        if self.mode == "reversal" and self.size_mode != "net_position":
+            import warnings
+            warnings.warn(
+                "⚠️ reversal-Mode mit size_mode='fixed' kann zu hohem Risiko führen"
+            )
+        
+        # 6️⃣ Preemptive Hedge ohne enabled macht keinen Sinn
+        if self.preemptive_hedge and not self.enabled:
+            import warnings
+            warnings.warn(
+                "⚠️ preemptive_hedge=true aber enabled=false → Hedge wird nicht aktiv"
+            )
         
         return self
 
@@ -178,18 +230,20 @@ class GridBotConfig(BaseModel):
     grid: GridConfig
     risk: RiskConfig = Field(default_factory=RiskConfig)
     margin: MarginConfig = Field(default_factory=MarginConfig)
-    hedge: HedgeConfig = Field(default_factory=HedgeConfig)  # ✅ Mit Validierung
+    hedge: HedgeConfig = Field(default_factory=HedgeConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
 
     @model_validator(mode='after')
     def validate_cross_field_logic(self):
         """Prüft Abhängigkeiten zwischen Feldern"""
         
+        # ✅ FIX: self.grid.upper_price statt self.upper_price!
+        
         # 1️⃣ SL fixed → stop_loss_price muss gesetzt sein
         if self.grid.sl_mode == SLMode.FIXED and self.grid.stop_loss_price is None:
             raise ValueError("stop_loss_price muss gesetzt sein bei sl_mode='fixed'")
 
-        # 2️⃣ upper/lower Relation prüfen
+        # 2️⃣ upper/lower Relation (schon in GridConfig geprüft, aber nochmal zur Sicherheit)
         if self.grid.upper_price <= self.grid.lower_price:
             raise ValueError(
                 f"upper_price ({self.grid.upper_price}) muss größer als lower_price ({self.grid.lower_price}) sein"
