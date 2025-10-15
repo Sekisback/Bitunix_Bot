@@ -184,7 +184,8 @@ class VirtualOrderManager:
         order.filled_time = time.time()
         
         self.logger.info(
-            f"[VIRTUAL] ✅ FILL: {order.side} {order.qty}@{fill_price:.4f} "
+            f"💰 {self.symbol} "
+            f"✅ FILL: {order.side} {order.qty}@{fill_price:.4f} "
             f"(Order @ {order.price:.4f})"
         )
         

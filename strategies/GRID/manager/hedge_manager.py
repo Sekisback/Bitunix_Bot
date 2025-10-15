@@ -288,12 +288,12 @@ class HedgeManager:
 
         if current_state != last_logged_state:
             self._last_hedge_log = current_state
-            self.logger.info(
-                f"[HEDGE] 📊 @ {current_price:.4f}: "
-                f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
-                f"Filled ohne TP={len(filled_without_tp)} | "
-                f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
-            )
+            # self.logger.info(
+            #     f"[HEDGE] 📊 @ {current_price:.4f}: "
+            #     f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
+            #     f"Filled ohne TP={len(filled_without_tp)} | "
+            #     f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
+            # )
         
         # Kein Risiko → Hedge schließen
         if target_qty < 0.001:

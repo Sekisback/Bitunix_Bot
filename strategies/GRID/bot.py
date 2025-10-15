@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """GRID Trading Bot mit Error Handling"""
 
-#!/usr/bin/env python3
-"""GRID Trading Bot mit Error Handling"""
-
 import argparse
 import asyncio
 import logging
@@ -18,15 +15,21 @@ sys.path.insert(0, str(root_dir))
 sys.path.insert(0, str(Path(__file__).parent))
 
 from utils.constants import AUTO_SYNC_CHECK_INTERVAL, WS_STARTUP_DELAY, MAIN_LOOP_SLEEP_SECONDS
-from utils.exceptions import (ConfigValidationError, GridInitializationError, OrderSyncError, WebSocketConnectionError)
+from utils.exceptions import (
+    ConfigValidationError, GridInitializationError, 
+    OrderSyncError, WebSocketConnectionError
+)
+
 from core.config import Config
 from core.open_api_http_future_private import OpenApiHttpFuturePrivate
 from core.open_api_http_future_public import OpenApiHttpFuturePublic
 from core.open_api_ws_future_public import OpenApiWsFuturePublic
 from core.open_api_ws_future_private import OpenApiWsFuturePrivate
+
 from manager.grid_manager import GridManager
 from manager.grid_lifecycle import GridState
 from manager.account_sync import AccountSync
+
 from utils.config_loader import load_config
 from utils.logging_setup import setup_logging
 
@@ -36,6 +39,7 @@ for name in ["core.open_api_ws_future_public", "core.open_api_ws_future_private"
     logging.getLogger(name).setLevel(logging.ERROR)
 
 logger = logging.getLogger("GRID-BOT")
+
 
 class GridBot:
     """GRID Bot mit Exception Handling"""
@@ -90,7 +94,7 @@ class GridBot:
                         active = sum(1 for l in self.grid.levels if l.active)
                         filled = sum(1 for l in self.grid.levels if l.filled)
                         
-                        # ✅ NEU: Risiko-basierte Net-Berechnung
+                        # ✅ Risiko-basierte Net-Berechnung
                         if self.grid.grid_direction == "long":
                             active_below = sum(
                                 1 for l in self.grid.levels 
@@ -120,9 +124,9 @@ class GridBot:
                         if hedge_active:
                             hedge_price = getattr(self.grid.hedge_manager, "current_hedge_price", None)
                             hedge_qty = getattr(self.grid.hedge_manager, "current_hedge_size", 0)
-                            hedge_str = f"🛡️  @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️"
+                            hedge_str = f"🛡️  @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️ "
                         else:
-                            hedge_str = "⏸️"
+                            hedge_str = "⏸️ "
                         
                         # 💰 PnL-Daten vom VirtualOrderManager
                         if self.grid.trading.dry_run and self.grid.virtual_manager:
@@ -133,11 +137,12 @@ class GridBot:
                             pnl = 0.0
                             wr = 0.0
                         
-                        # 🎯 Kompakte Ausgabe
+                        # 🎯 ✅ VOLLSTÄNDIGE Log-Zeile (wie gewünscht)
                         logger.info(
                             f"💰 {self.symbol} @ {last_price:.4f} | "
                             f"Active: {active}/{total} | Filled: {filled} | "
-                            # f"Net: {net_pos:.2f} | Hedge: {hedge_str} | "
+                            #f"Net: {net_pos:.2f} | "
+                            f"Hedge: {hedge_str} | "
                             f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
                         )
                         
@@ -217,7 +222,6 @@ class GridBot:
                     continue
 
                 elif state == GridState.ACTIVE:
-                    #self.grid.print_grid_status()
                     self.account_sync.sync(ws_enabled=True)
                     await asyncio.sleep(self.update_interval)
 
@@ -242,23 +246,15 @@ class GridBot:
             logger.info("✅ Bot beendet")
 
     async def _auto_sync_check(self):
+        """Periodischer OrderSync"""
         try:
             result = await self.grid.sync_orders()
+            # logger.info(
+            #     f"🔍 Auto-Sync: MATCHED={result['matched']} | "
+            #     f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
+            # )
             
-            # ✅ FIX: Nur loggen wenn was passiert ist
-            if result.get('placed', 0) > 0 or result.get('cancelled', 0) > 0:
-                logger.info(
-                    f"🔍 Auto-Sync: MATCHED={result['matched']} | "
-                    f"MISSING={result['missing']} | OBSOLETE={result['obsolete']} | "
-                    f"PLACED={result.get('placed', 0)} | CANCELLED={result.get('cancelled', 0)}"
-                )
-            else:
-                logger.debug(
-                    f"Auto-Sync: MATCHED={result['matched']} | "
-                    f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
-                )
-            
-            # === Hedge nach Sync aktualisieren (falls Orders nachträglich platziert wurden) ===
+            # Hedge nach Sync aktualisieren
             if result['placed'] > 0:
                 self.grid._update_net_position()
                 price_list = self.grid.calculator.calculate_price_list()
@@ -279,126 +275,54 @@ class GridBot:
 
 
 async def main():
-    """Hauptfunktion mit strukturiertem Error-Handling"""
-    
-    # ========================================
-    # 1. Argumente parsen
-    # ========================================
     parser = argparse.ArgumentParser(
         description="Bitunix GRID Trading Bot",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Beispiel: python strategies/GRID/bot.py --config ONDOUSDT",
     )
-    parser.add_argument("--config", required=True, help="Coin Config (z.B. ONDOUSDT)")
-    parser.add_argument("--sync", action="store_true", help="OrderSync Dry-Run ausführen")
+    parser.add_argument("--config", required=True, help="Coin Config")
+    parser.add_argument("--sync", action="store_true", help="OrderSync Dry-Run")
     args = parser.parse_args()
 
-    # ========================================
-    # 2. Config laden
-    # ========================================
     try:
         strategy_dir = Path(__file__).parent
         os.chdir(strategy_dir)
         config = load_config(args.config)
         os.chdir(root_dir)
-        
     except ConfigValidationError as e:
-        print(f"❌ Config-Validierung fehlgeschlagen:\n{e}")
-        sys.exit(1)
-        
-    except FileNotFoundError:
-        print(f"❌ Config-Datei nicht gefunden: configs/{args.config}.yaml")
-        print(f"Verfügbare Configs: {list(Path('configs').glob('*.yaml'))}")
-        sys.exit(1)
-        
-    except Exception as e:
-        print(f"❌ Unerwarteter Fehler beim Config-Laden: {e}")
-        import traceback
-        traceback.print_exc()
         sys.exit(1)
 
     symbol = config.symbol
 
-    # ========================================
-    # 3. Logging initialisieren
-    # ========================================
     try:
         setup_logging(symbol=symbol, strategy="GRID", debug=config.system.debug)
-        logger.info(f"📝 Logging initialisiert für {symbol}")
     except Exception as e:
-        print(f"⚠️ Logging-Setup fehlgeschlagen: {e}")
-        print("Fahre ohne vollständiges Logging fort...")
+        print(f"⚠️ Logging-Setup error: {e}")
 
-    # ========================================
-    # 4. API-Clients erstellen
-    # ========================================
-    try:
-        cfg = Config()
-        client_pri = OpenApiHttpFuturePrivate(cfg)
-        client_pub = OpenApiHttpFuturePublic(cfg)
-        logger.info("✅ API-Clients erstellt")
-    except Exception as e:
-        logger.error(f"❌ API-Client-Initialisierung fehlgeschlagen: {e}")
-        sys.exit(1)
+    cfg = Config()
+    client_pri = OpenApiHttpFuturePrivate(cfg)
+    client_pub = OpenApiHttpFuturePublic(cfg)
 
-    # ========================================
-    # 5. GridBot erstellen
-    # ========================================
     try:
         bot = GridBot(config, client_pri, client_pub)
-        
     except GridInitializationError as e:
-        logger.error(f"❌ Grid-Initialisierung fehlgeschlagen: {e}")
-        sys.exit(1)
-        
-    except Exception as e:
-        logger.exception(f"❌ Unerwarteter Fehler bei GridBot-Erstellung: {e}")
+        logger.error(f"❌ Grid-Init fehlgeschlagen: {e}")
         sys.exit(1)
 
-    # ========================================
-    # 6. Margin & Leverage Setup
-    # ========================================
-    if not config.trading.dry_run:
-        try:
-            logger.info(f"⚙️ Margin-Setup: {config.margin.mode} | Hebel: {config.margin.leverage}x")
-            bot.grid.setup_margin()
-            logger.info("✅ Margin-Setup abgeschlossen")
-        except Exception as e:
-            logger.error(f"❌ Margin-Setup fehlgeschlagen: {e}")
-            logger.warning("Fahre trotzdem fort...")
-
-    # ========================================
-    # 7. OrderSync (optional)
-    # ========================================
+    # Margin Mode & Leverage Setup
+    bot.grid.setup_margin()
+    
     if args.sync:
-        logger.info("\n🔍 OrderSync Dry-Run...")
+        print("\n🔍 OrderSync-DryRun...")
         try:
             result = await bot.grid.sync_orders()
-            logger.info(f"✅ Sync-Ergebnis: {result}")
-            print(f"\n✅ OrderSync abgeschlossen: {result}")
-            
+            print(f"✅ Sync: {result}")
         except OrderSyncError as e:
-            logger.error(f"❌ OrderSync fehlgeschlagen: {e}")
-            print(f"❌ OrderSync Error: {e}")
-            
-        return  # Beende nach Sync
-
-    # ========================================
-    # 8. Bot starten
-    # ========================================
+            print(f"❌ Sync error: {e}")
+        return
     
-    try:
-        await bot.run()
-        
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Bot durch Benutzer gestoppt")
-        
-    except Exception as e:
-        logger.exception(f"❌ Bot-Laufzeitfehler: {e}")
-        sys.exit(1)
-        
-    finally:
-        logger.info("✅ Bot beendet")
+    await bot.run()
+
 
 if __name__ == "__main__":
     try:

@@ -1,7 +1,9 @@
 # file: strategies/GRID/manager/order_sync.py
+# PERFORMANCE FIX: Binary Search für Order-Matching
 import time
 import logging
 import asyncio
+import bisect
 import sys
 from pathlib import Path
 
@@ -24,7 +26,7 @@ class OrderSync:
         self.grid_direction = grid_direction
         self.fetch_orders_callback = None
         self._sync_lock = asyncio.Lock()
-        self.cancel_obsolete = cancel_obsolete  # Obsolete Orders löschen?
+        self.cancel_obsolete = cancel_obsolete
 
     async def fetch_exchange_orders(self):
         """Holt offene Orders über Callback oder HTTP-Fallback"""
@@ -38,31 +40,55 @@ class OrderSync:
 
     def match_orders(self, exchange_orders):
         """
+        ✅ OPTIMIERT: Binary Search für O(n log n)
+        
         Vergleicht Exchange-Orders mit Grid-Levels
-        Performance: O(n) durch Dict-Lookup
         """
         matched, missing, obsolete = [], [], []
         
-        # Dict mit Preis als Key für O(1) Lookup
-        order_dict = {}
-        for o in exchange_orders:
-            price = float(o.get("price", 0))
-            rounded_price = round(price, 8)
-            order_dict[rounded_price] = o
+        # ========================================
+        # STEP 1: Sortierte Preis-Liste erstellen
+        # ========================================
+        # Extrahiere Preise und sortiere sie
+        order_prices = []
+        price_to_order = {}
         
-        # Prüfe alle Grid-Levels
+        for o in exchange_orders:
+            price = round(float(o.get("price", 0)), 8)
+            order_prices.append(price)
+            price_to_order[price] = o
+        
+        # Sortiere Preise für Binary Search
+        order_prices.sort()
+        
+        # ========================================
+        # STEP 2: Match Levels mit Binary Search
+        # ========================================
         for lvl in self.levels:
             if not lvl.active and not lvl.filled:
                 rounded_level_price = round(lvl.price, 8)
-                matched_order = order_dict.get(rounded_level_price)
                 
-                # Fallback: Toleranz-Check
-                if not matched_order:
-                    for price, order in order_dict.items():
-                        if abs(price - rounded_level_price) < PRICE_TOLERANCE:
-                            matched_order = order
-                            break
+                # ✅ Binary Search: Finde nächste Preis-Position
+                idx = bisect.bisect_left(order_prices, rounded_level_price)
                 
+                matched_order = None
+                
+                # Exakter Match?
+                if idx < len(order_prices) and order_prices[idx] == rounded_level_price:
+                    matched_order = price_to_order[order_prices[idx]]
+                
+                # Toleranz-Check links/rechts
+                elif idx > 0:
+                    left_price = order_prices[idx - 1]
+                    if abs(left_price - rounded_level_price) < PRICE_TOLERANCE:
+                        matched_order = price_to_order[left_price]
+                
+                if not matched_order and idx < len(order_prices):
+                    right_price = order_prices[idx]
+                    if abs(right_price - rounded_level_price) < PRICE_TOLERANCE:
+                        matched_order = price_to_order[right_price]
+                
+                # Ergebnis speichern
                 if matched_order:
                     lvl.order_id = matched_order.get("orderId")
                     lvl.active = True
@@ -70,14 +96,20 @@ class OrderSync:
                 else:
                     missing.append(lvl)
         
-        # Finde obsolete Orders
+        # ========================================
+        # STEP 3: Obsolete Orders finden
+        # ========================================
         level_prices = {round(l.price, 8) for l in self.levels}
-        for o in exchange_orders:
-            price = round(float(o.get("price", 0)), 8)
+        
+        for price in order_prices:
             if price not in level_prices:
-                is_in_grid = any(abs(price - lp) < PRICE_TOLERANCE for lp in level_prices)
+                # Toleranz-Check
+                is_in_grid = any(
+                    abs(price - lp) < PRICE_TOLERANCE 
+                    for lp in level_prices
+                )
                 if not is_in_grid:
-                    obsolete.append(o)
+                    obsolete.append(price_to_order[price])
         
         return matched, missing, obsolete
 
@@ -154,13 +186,11 @@ class OrderSync:
                             order_id = o.get("orderId")
                             self.logger.info(f"🗑️ Cancel ID={order_id}")
                             
-                            # Cancel Order via API
                             cancel_result = self.client.cancel_orders(
                                 symbol=self.symbol,
                                 order_list=[{"orderId": order_id}]
                             )
                             
-                            # Prüfe Erfolg
                             success_list = cancel_result.get("successList", [])
                             if success_list:
                                 cancelled_count += 1
