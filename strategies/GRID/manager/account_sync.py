@@ -42,10 +42,15 @@ class AccountSync:
             if isinstance(res, list):
                 res = next((r for r in res if r.get("marginCoin") == "USDT"), res[0])
 
-            self.balance = float(res.get("available", 0.0))
+            new_balance = float(res.get("available", 0.0))
+            
+            # 💡 Nur loggen wenn sich Balance geändert hat (Toleranz 0.01 USDT)
+            if abs(new_balance - self.balance) > 0.01:
+                self.logger.info(f"💰 HTTP Balance: {new_balance:.2f} {self.balance_coin}")
+            
+            self.balance = new_balance
             self.balance_coin = res.get("marginCoin", "USDT")
             self.last_sync = time.time()
-            self.logger.info(f"💰 HTTP Balance: {self.balance:.2f} {self.balance_coin}")
         except Exception as e:
             self.logger.error(f"HTTP Balance error: {e}")
 

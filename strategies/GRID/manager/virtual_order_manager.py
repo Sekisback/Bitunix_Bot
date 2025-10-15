@@ -276,6 +276,14 @@ class VirtualOrderManager:
             if position.pnl < self.worst_trade:
                 self.worst_trade = position.pnl
         
+        # ✅ DEBUG: Stats nach Update ausgeben
+        self.logger.info(
+            f"[DEBUG] Stats nach Close: "
+            f"Trades={self.total_trades} | "
+            f"Total PnL={self.total_pnl:.2f} | "
+            f"W/L={self.winning_trades}/{self.losing_trades}"
+        )
+        
         # Log mit Emoji
         emoji = "🎯" if reason == "TP" else "🛑"
         profit_emoji = "💰" if position.pnl > 0 else "📉"

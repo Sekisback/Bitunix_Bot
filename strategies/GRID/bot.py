@@ -52,6 +52,7 @@ class GridBot:
         self.dry_run = config.trading.dry_run
         self.update_interval = config.system.update_interval
         self._stop = False
+        self._last_heartbeat = 0
 
         self.grid = GridManager(client_pri, config, client_pub=client_pub)
 
@@ -75,23 +76,84 @@ class GridBot:
                 price_data = data.get("data", {})
                 if not price_data:
                     return
+                
                 last_price = float(price_data.get("la", price_data.get("c", 0)))
                 
-                # ✅ NEU: Nur bei signifikanten Änderungen loggen
-                old_price = getattr(self, "_last_price", None)
-                if old_price:
-                    change_pct = abs(last_price - old_price) / old_price
-                    if change_pct < 0.001:  # < 0.1% → Skip Log
-                        self._last_price = last_price
-                        self.grid.update(last_price)
-                        return
-                
-                self._last_price = last_price
-                logger.info(f"💰 {self.symbol} @ {last_price:.4f}")
-                self.grid.update(last_price)
+                if last_price != getattr(self, "_last_price", None):
+                    self._last_price = last_price
+                    
+                    # ⏱️ Nur zur vollen Minute loggen
+                    from datetime import datetime
+                    now = datetime.now()
+                    current_minute = now.strftime("%Y-%m-%d %H:%M")
+                    last_logged_minute = getattr(self, "_last_logged_minute", None)
+                    
+                    if current_minute != last_logged_minute:
+                        # 📊 Grid-Status sammeln
+                        total = len(self.grid.levels)
+                        active = sum(1 for l in self.grid.levels if l.active)
+                        filled = sum(1 for l in self.grid.levels if l.filled)
+                        
+                        # ✅ NEU: Risiko-basierte Net-Berechnung
+                        if self.grid.grid_direction == "long":
+                            active_below = sum(
+                                1 for l in self.grid.levels 
+                                if l.active and l.price < last_price
+                            )
+                            filled_pos = sum(
+                                1 for l in self.grid.levels 
+                                if l.position_open or l.filled
+                            )
+                            net_risk = active_below + filled_pos
+                        else:  # short
+                            active_above = sum(
+                                1 for l in self.grid.levels 
+                                if l.active and l.price > last_price
+                            )
+                            filled_pos = sum(
+                                1 for l in self.grid.levels 
+                                if l.position_open or l.filled
+                            )
+                            net_risk = active_above + filled_pos
+                        
+                        base_size = self.grid.risk_manager.calculate_effective_size()
+                        net_pos = net_risk * base_size
+                        
+                        # 🛡️ Hedge-Status mit Preis
+                        hedge_active = getattr(self.grid.hedge_manager, "active", False)
+                        if hedge_active:
+                            hedge_price = getattr(self.grid.hedge_manager, "current_hedge_price", None)
+                            hedge_qty = getattr(self.grid.hedge_manager, "current_hedge_size", 0)
+                            hedge_str = f"🛡️ @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️"
+                        else:
+                            hedge_str = "⏸️"
+                        
+                        # 💰 PnL-Daten vom VirtualOrderManager
+                        if self.grid.trading.dry_run and self.grid.virtual_manager:
+                            stats = self.grid.virtual_manager.get_stats()
+                            pnl = stats['total_pnl']
+                            wr = stats['win_rate']
+                        else:
+                            pnl = 0.0
+                            wr = 0.0
+                        
+                        # 🎯 Kompakte Ausgabe
+                        logger.info(
+                            f"💰 {self.symbol} @ {last_price:.4f} | "
+                            f"Active: {active}/{total} | Filled: {filled} | "
+                            f"Net: {net_pos:.2f} | Hedge: {hedge_str} | "
+                            f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
+                        )
+                        
+                        self._last_logged_minute = current_minute
+                    
+                    # Grid-Update
+                    self.grid.update(last_price)
+                    
         except Exception as e:
             logger.error(f"Public WS error: {e}")
-    
+
+
     async def _on_private_ws(self, channel, data):
         """Callback für Private WS"""
         try:
@@ -159,7 +221,7 @@ class GridBot:
                     continue
 
                 elif state == GridState.ACTIVE:
-                    self.grid.print_grid_status()
+                    #self.grid.print_grid_status()
                     self.account_sync.sync(ws_enabled=True)
                     await asyncio.sleep(self.update_interval)
 

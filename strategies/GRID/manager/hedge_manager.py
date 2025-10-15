@@ -25,6 +25,7 @@ class HedgeManager:
         self.dry_run = dry_run
         self.price_protect_scope = None
         self.live_price = None  # ✅ FIX: Initialisierung hinzugefügt
+        self.hedge_pending = False
 
         # Trading Pair Info laden (priceProtectScope)
         self._load_trading_pair_info()
@@ -217,62 +218,133 @@ class HedgeManager:
         self.active = False
 
     # ----------------------------------------------------------------
-    def update_preemptive_hedge(self, net_position_size: float, dry_run: bool = False, 
-                                lower_bound: float = None, upper_bound: float = None, step: float = None):
+    def update_preemptive_hedge(self, dry_run: bool = False, 
+                           lower_bound: float = None, upper_bound: float = None, 
+                           step: float = None, current_price: float = None,
+                           grid_levels: list = None, base_size: float = 20.0):
         """
-        Passt präventiven Hedge an offene Grid-Orders an.
+        Passt präventiven Hedge an.
         
-        ✅ FIX: Prüft jetzt alle None-Werte vor Berechnung
+        Risiko = Offene Orders unter/über Preis + Gefüllte ohne TP
         """
-        # self.logger.info(f"[HEDGE] 🔍 update_preemptive_hedge() aufgerufen: net={net_position_size:.2f}, dry_run={dry_run}")
-
+        
         if not getattr(self.config, "enabled", False):
-            self.logger.warning("[HEDGE] ⚠️ Hedge nicht aktiviert (config.enabled=False)")
             return
-
         if not getattr(self.config, "preemptive_hedge", False):
-            self.logger.warning("[HEDGE] ⚠️ Präventiv-Hedge nicht aktiviert (config.preemptive_hedge=False)")
             return
-
-        if abs(net_position_size) < 0.001:
-            self.logger.info("[HEDGE] 🎯 Keine aktiven Orders → Hedge schließen")
-            if self.active and not dry_run:
-                self.close()
-            self.active = False
-            return
-
-        # ✅ FIX: Prüfe ob Grid-Bounds vorhanden sind
-        if not (lower_bound and upper_bound and step):
-            self.logger.warning("[HEDGE] ⚠️ Keine Grid-Bounds verfügbar → kein Hedge")
+        
+        # Prüfe Daten
+        if not (lower_bound and upper_bound and step and current_price and grid_levels):
+            self.logger.warning("[HEDGE] ⚠️ Unvollständige Daten")
             return
 
         grid_mode = getattr(self.config, "grid_direction", "long")
-
+        
+        # ✅ Risiko-Berechnung
         if grid_mode == "long":
+            # Offene Orders UNTER Preis
+            active_orders_below = [
+                lvl for lvl in grid_levels 
+                if lvl.active and lvl.price < current_price and lvl.side == "BUY"
+            ]
+            
+            # Gefüllte ohne TP
+            filled_without_tp = [
+                lvl for lvl in grid_levels 
+                if lvl.position_open or lvl.filled
+            ]
+            
+            risk_count = len(active_orders_below) + len(filled_without_tp)
             hedge_side = "SELL"
-            hedge_qty = abs(net_position_size)
             hedge_price = lower_bound - step
+            
         elif grid_mode == "short":
+            active_orders_above = [
+                lvl for lvl in grid_levels 
+                if lvl.active and lvl.price > current_price and lvl.side == "SELL"
+            ]
+            
+            filled_without_tp = [
+                lvl for lvl in grid_levels 
+                if lvl.position_open or lvl.filled
+            ]
+            
+            risk_count = len(active_orders_above) + len(filled_without_tp)
             hedge_side = "BUY"
-            hedge_qty = abs(net_position_size)
             hedge_price = upper_bound + step
         else:
             return
-
-        # ✅ FIX: Zusätzlicher Check
+        
+        target_qty = risk_count * base_size
+        
+        self.logger.info(
+            f"[HEDGE] 📊 @ {current_price:.4f}: "
+            f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
+            f"Filled ohne TP={len(filled_without_tp)} | "
+            f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
+        )
+        
+        # Kein Risiko → Hedge schließen
+        if target_qty < 0.001:
+            if self.active and not dry_run:
+                self.close()
+            self.active = False
+            self.hedge_pending = False
+            return
+        
+        # ✅ Hedge existiert → MODIFY
+        if self.active and hasattr(self, "hedge_order_id"):
+            current_qty = getattr(self, "current_hedge_size", 0)
+            
+            if current_qty > 0:
+                deviation = abs(target_qty - current_qty) / current_qty
+                
+                if deviation > 0.05:  # 5% Schwelle
+                    self.logger.info(f"[HEDGE] 🔄 Modify Qty: {current_qty:.2f} → {target_qty:.2f}")
+                    
+                    if not dry_run:
+                        try:
+                            self.api_client.modify_order(
+                                order_id=self.hedge_order_id,
+                                qty=str(target_qty)
+                            )
+                            self.current_hedge_size = target_qty
+                            self.logger.info(f"[HEDGE] ✅ Qty angepasst")
+                        except Exception as e:
+                            self.logger.error(f"[HEDGE] ❌ Modify failed: {e}")
+                            # Fallback: Close + neu platzieren
+                            self.close()
+                            self.active = False
+                    else:
+                        self.current_hedge_size = target_qty
+            return
+        
+        # ✅ Neuer Hedge → Platzieren
+        # KEINE PriceProtect-Prüfung hier! (macht grid_manager)
+        
         if not hedge_price or hedge_price <= 0:
-            self.logger.warning("[HEDGE] ⚠️ Ungültiger Hedge-Preis berechnet")
             return
-
-        # Net-Position für get_size() speichern
-        self.current_net_position = net_position_size
-
+        
+        self.logger.info(f"[HEDGE] 🚀 {hedge_side} {target_qty:.2f} @ {hedge_price:.6f}")
+        
         if dry_run:
-            self.logger.info(f"[HEDGE] Würde {hedge_side} {hedge_qty:.2f} @ {hedge_price:.6f} platzieren")
             self.active = True
+            self.current_hedge_size = target_qty
+            self.current_hedge_price = hedge_price
             return
-
+        
         try:
-            self.place_order(hedge_side, hedge_price, hedge_qty)
+            result = self.api_client.place_order(
+                symbol=self.symbol, side=hedge_side, order_type="LIMIT",
+                qty=target_qty, price=hedge_price, trade_side="OPEN",
+                client_id=f"HEDGE_{int(time.time())}"
+            )
+            
+            self.hedge_order_id = result.get("orderId")
+            self.current_hedge_size = target_qty
+            self.current_hedge_price = hedge_price
+            self.active = True
+            
+            self.logger.info(f"[HEDGE] ✅ Order ID={self.hedge_order_id}")
         except Exception as e:
-            self.logger.error(f"[HEDGE] ❌ Fehler beim Hedge-Update: {e}")
+            self.logger.error(f"[HEDGE] ❌ Fehler: {e}")

@@ -22,7 +22,7 @@ trading:
 grid:
   upper_price: 0.84                  # Obere Preisgrenze des Grids (Coin-spezifisch)
   lower_price: 0.74                 # Untere Preisgrenze des Grids (Coin-spezifisch)
-  grid_levels: 20                   # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
+  grid_levels: 40                   # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
 
   base_order_size: 20               # Grund-Ordergröße (Coin-spezifisch)
 
