@@ -137,12 +137,12 @@ class GridManager:
             if self.trading.dry_run:
                 from .virtual_order_manager import VirtualOrderManager
                 self.virtual_manager = VirtualOrderManager(self.symbol, self.logger)
-                self.logger.info("[VIRTUAL] 🎮 Dry-Run Mode mit Virtual Orders aktiv")
+                self.logger.info("[VIRTUAL]  Dry-Run Mode mit Virtual Orders aktiv")
             else:
                 self.virtual_manager = None
             
             self._initial_orders_placed = False
-            self.logger.warning("[INIT] ⏳ Warte auf ersten Live-Preis vor Order-Platzierung...")
+            #self.logger.warning("[INIT] ⏳ Warte auf ersten Live-Preis vor Order-Platzierung...")
 
         except (InvalidGridConfigError, GridInitializationError) as e:
             self.lifecycle.set_state(GridState.ERROR, message=str(e))
@@ -208,23 +208,41 @@ class GridManager:
             if lvl.active or lvl.filled:
                 continue
             
+            # === Richtung prüfen ===
             if lvl.side == "BUY" and not allow_long:
                 continue
             if lvl.side == "SELL" and not allow_short:
                 continue
             
+            # === Preis-Validierung ===
             if current_price is not None:
                 if lvl.side == "BUY" and lvl.price >= current_price:
                     skipped_count += 1
                     continue
-                
                 if lvl.side == "SELL" and lvl.price <= current_price:
                     skipped_count += 1
                     continue
             
             try:
-                self._place_entry(lvl)
+                # ✅ FIX: Explizites Logging für initiale Orders
+                if self.trading.dry_run and self.virtual_manager:
+                    # Order platzieren
+                    self._place_entry(lvl)
+                    
+                    # Initial-Log ausgeben
+                    tp_str = f"{lvl.tp:.4f}" if lvl.tp else "None"
+                    sl_str = f"{lvl.sl:.4f}" if lvl.sl else "None"
+                    self.logger.info(
+                        f"[VIRTUAL] 🟢 {lvl.side} @ {lvl.price:.4f} | "
+                        f"size={self.risk_manager.calculate_effective_size()} | "
+                        f"TP={tp_str} | SL={sl_str}"
+                    )
+                else:
+                    # Real-Mode oder ohne Virtual Manager
+                    self._place_entry(lvl)
+                
                 placed_count += 1
+                
             except Exception as e:
                 self.logger.error(f"❌ Initial Order @ {lvl.price} fehlgeschlagen: {e}")
         
@@ -861,7 +879,7 @@ class GridManager:
         self.account_sync = account_sync
         account_sync.grid_manager = self
         self.order_sync.fetch_orders_callback = lambda: list(account_sync.orders.values())
-        self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
+        #self.logger.info(f"[{self.symbol}] OrderSync ↔ AccountSync")
 
     def setup_margin(self):
         if self.trading.dry_run:
