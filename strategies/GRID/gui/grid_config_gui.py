@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
-GRID Bot Config GUI - Step 1: Grundgerüst
-Rechts: Menu | Links: Chart-Placeholder
+GRID Bot Config GUI - Step 2: Chart mit Candlesticks
+Rechts: Menu | Links: Live Chart
 """
 
 import tkinter as tk
 from tkinter import ttk
 import sys
+import threading
 from pathlib import Path
+import pandas as pd
+import mplfinance as mpf
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # Pfade
 root_dir = Path(__file__).parent.parent.parent.parent
@@ -21,6 +25,10 @@ class GridConfigGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("GRID Bot Config GUI")
+        # Sauberes Beenden abfangen
+        self._running = True
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+
         
         # Maximiere Fenster beim Start (plattformübergreifend)
         self._maximize_window()
@@ -34,6 +42,29 @@ class GridConfigGUI:
         self.selected_coin = tk.StringVar()
         self.selected_timeframe = tk.StringVar(value="15M")
         
+        # Chart-Canvas
+        self.chart_canvas = None
+        
+        # Timeframe-Mapping (GUI -> API)
+        self.timeframe_map = {
+            "1M": "1m",
+            "5M": "5m",
+            "15M": "15m",
+            "1H": "1H",
+            "4H": "4H",
+            "1D": "1D"
+        }
+        
+        # Style für alle Comboboxen
+        style = ttk.Style()
+        style.configure("TCombobox", 
+                    padding=4)  # Innenabstand oben/unten
+        
+        # Optional: Schriftgröße auch über Style
+        style.configure("TCombobox", 
+                    font=("Arial", 12),
+                    padding=8)
+        
         # Layout erstellen
         self._create_layout()
         
@@ -41,19 +72,14 @@ class GridConfigGUI:
         self._load_coins()
     
     def _maximize_window(self):
-        """Maximiert Fenster plattformübergreifend"""
-        try:
-            # Linux/Unix
-            self.root.attributes('-zoomed', True)
-        except:
-            try:
-                # Windows
-                self.root.state('zoomed')
-            except:
-                # Fallback: Bildschirmgröße setzen
-                screen_width = self.root.winfo_screenwidth()
-                screen_height = self.root.winfo_screenheight()
-                self.root.geometry(f"{screen_width}x{screen_height}+0+0")
+        """Fenstergröße setzen und mittig positionieren"""
+        width, height = 1600, 900
+        screen_w = self.root.winfo_screenwidth()
+        screen_h = self.root.winfo_screenheight()
+        x = int((screen_w / 2) - (width / 2))
+        y = int((screen_h / 2) - (height / 2))
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
+
     
     def _create_layout(self):
         """Erstellt das Hauptlayout: Links Chart, Rechts Menu"""
@@ -85,26 +111,26 @@ class GridConfigGUI:
         
         # Padding Container für alles
         content = tk.Frame(self.menu_frame, bg="#2b2b2b")
-        content.pack(fill=tk.BOTH, expand=True, padx=15, pady=20)
+        content.pack(fill=tk.BOTH, expand=True, padx=15)
         
         # Header
         header = tk.Label(
             content,
-            text="⚙️ GRID Bot Config",
+            text="GRID Bot Config",
             font=("Arial", 16, "bold"),
             bg="#2b2b2b",
             fg="#ffffff",
-            anchor="w"
+            anchor="center"
         )
-        header.pack(fill=tk.X, pady=(0, 20))
+        header.pack(fill=tk.X, pady=(5, 0))
         
         # Separator
-        ttk.Separator(content, orient='horizontal').pack(fill='x', pady=10)
+        ttk.Separator(content, orient='horizontal').pack(fill='x', pady=(5, 0))
         
         # === COIN SELECTOR ===
         coin_label = tk.Label(
             content,
-            text="📈 Coin auswählen:",
+            text="Coin auswählen:",
             font=("Arial", 12),
             bg="#2b2b2b",
             fg="#ffffff",
@@ -119,19 +145,18 @@ class GridConfigGUI:
             width=32,  # 3 Buttons (10) + 2 Abstände (1+1)
             font=("Arial", 11)
         )
-        self.coin_dropdown.pack(anchor="w", pady=(0, 20))
+        self.coin_dropdown.pack(anchor="w")
         self.coin_dropdown.bind("<<ComboboxSelected>>", self._on_coin_select)
         
         # === TIMEFRAME SELECTOR ===
         timeframe_label = tk.Label(
             content,
-            text="⏱️ Timeframe:",
             font=("Arial", 12),
             bg="#2b2b2b",
             fg="#ffffff",
             anchor="w"
         )
-        timeframe_label.pack(fill=tk.X, pady=(10, 5))
+        timeframe_label.pack(fill=tk.X, pady=(0, 5))
         
         # Timeframe Buttons Frame (2 Reihen)
         tf_container = tk.Frame(content, bg="#2b2b2b")
@@ -170,10 +195,7 @@ class GridConfigGUI:
                 command=lambda t=tf: self._on_timeframe_select(t)
             )
             btn.pack(side=tk.LEFT, padx=2, pady=2)
-        
-        # Separator
-        ttk.Separator(content, orient='horizontal').pack(fill='x', pady=20)
-        
+               
         # === STATUS ===
         self.status_label = tk.Label(
             content,
@@ -211,12 +233,16 @@ class GridConfigGUI:
             self.coin_dropdown['values'] = self.coins
             
             # Default: BTCUSDT wenn vorhanden
-            if "BTCUSDT" in self.coins:
-                self.coin_dropdown.set("BTCUSDT")
+            if "ONDOUSDT" in self.coins:
+                self.coin_dropdown.set("ONDOUSDT")
             elif self.coins:
                 self.coin_dropdown.set(self.coins[0])
             
             self._update_status(f"✅ {len(self.coins)} Coins geladen")
+            
+            # Initial Chart laden
+            if self.coins:
+                self._load_chart()
             
         except Exception as e:
             self._update_status(f"❌ Fehler: {e}")
@@ -227,19 +253,116 @@ class GridConfigGUI:
         coin = self.selected_coin.get()
         tf = self.selected_timeframe.get()
         self._update_status(f"📊 {coin} | {tf}")
-        print(f"Selected: {coin} @ {tf}")
         
-        # TODO Step 2: Chart laden
+        # Chart laden
+        self._load_chart()
     
     def _on_timeframe_select(self, timeframe):
         """Callback wenn Timeframe ausgewählt wird"""
         self.selected_timeframe.set(timeframe)
         coin = self.selected_coin.get()
         self._update_status(f"📊 {coin} | {timeframe}")
-        print(f"Timeframe changed: {timeframe}")
         
-        # TODO Step 2: Chart aktualisieren
+        # Chart aktualisieren
+        self._load_chart()    
+
+    def _load_chart(self):
+        """Startet Thread für API-Call"""
+        threading.Thread(target=self._load_chart_thread, daemon=True).start()
+
+    def _load_chart_thread(self):
+        """Lädt Daten im Hintergrund, zeichnet Chart im Main-Thread"""
+        coin = self.selected_coin.get()
+        tf = self.selected_timeframe.get()
+        if not coin:
+            return
+
+        self._update_status(f"⏳ Lade Chart für {coin} | {tf}...")
+
+        try:
+            api_tf = self.timeframe_map.get(tf, "15m")
+            response = self.client_pub.get_kline(symbol=coin, interval=api_tf, limit=200)
+            if not response:
+                self._update_status(f"❌ Keine Daten für {coin}")
+                return
+
+            df = pd.DataFrame(response)
+            if "time" in df.columns:
+                df.rename(columns={"time": "timestamp"}, inplace=True)
+            if "quoteVol" in df.columns:
+                df.rename(columns={"quoteVol": "volume"}, inplace=True)
+
+            # ⚙️ Fix für FutureWarning
+            df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+            df.set_index("timestamp", inplace=True)
+
+            for col in ["open", "high", "low", "close", "volume"]:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+            df.dropna(inplace=True)
+
+            if df.empty:
+                self._update_status("❌ Keine gültigen Daten")
+                return
+
+            # Chart-Zeichnung IM MAIN-THREAD ausführen
+            self.root.after(0, lambda: self._draw_chart(df, coin, tf))
+
+        except Exception as e:
+            self._update_status(f"❌ Fehler: {e}")
+            import traceback; traceback.print_exc()
     
+    def _draw_chart(self, df, coin, tf):
+        """Zeichnet Chart im GUI-Thread (TradingView-Stil, kompakt ohne Rand)"""
+        import matplotlib.pyplot as plt
+
+        # Alten Canvas entfernen
+        if self.chart_canvas:
+            self.chart_canvas.get_tk_widget().destroy()
+        if hasattr(self, "chart_label") and self.chart_label.winfo_exists():
+            self.chart_label.destroy()
+
+        # 🎨 Etwas hellerer Hintergrund (#121212 → #1c1c1c)
+        fig, ax = plt.subplots(figsize=(9, 4.5), dpi=100, facecolor="#1c1c1c")
+        ax.set_facecolor("#1c1c1c")
+
+
+        # Chart plotten auf definierter Achse
+        mpf.plot(
+            df.sort_index(ascending=True),
+            type="candle",
+            style="nightclouds",
+            ax=ax,
+            volume=False,
+            datetime_format="%H:%M",
+            xrotation=0,
+        )
+
+        # === TradingView-Style ===
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        ax.grid(True, axis="y", color="#333333", linestyle="-", linewidth=0.4)
+        ax.grid(False, axis="x")
+
+        ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
+        ax.title.set_color("#ffffff")
+
+        # Kein zusätzlicher Rand
+        fig.subplots_adjust(left=0.03, right=0.985, top=0.94, bottom=0.04)
+        ax.margins(x=0.02, y=0.05)
+
+        # Canvas in GUI einbetten
+        self.chart_canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+        self.chart_canvas.draw()
+        self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Status & Auto-Refresh
+        self._update_status(f"✅ {coin} | {tf} | {len(df)} Bars")
+        if self._running:
+            self._after_id = self.root.after(30000, self._load_chart)
+
+
     def _update_status(self, message):
         """Aktualisiert Status-Label"""
         self.status_label.config(text=message)
@@ -248,6 +371,36 @@ class GridConfigGUI:
     def run(self):
         """Startet die GUI"""
         self.root.mainloop()
+
+    def _on_close(self):
+        """Beendet Auto-Refresh, Canvas und GUI vollständig"""
+        self._running = False
+
+        # geplanten Auto-Refresh abbrechen
+        try:
+            if hasattr(self, "_after_id"):
+                self.root.after_cancel(self._after_id)
+        except Exception:
+            pass
+
+        # Matplotlib-Canvas sauber schließen
+        try:
+            import matplotlib.pyplot as plt
+            plt.close("all")
+        except Exception:
+            pass
+
+        # Tk-Fenster zerstören
+        try:
+            self.root.quit()
+            self.root.destroy()
+        except Exception:
+            pass
+
+        # Programm wirklich beenden
+        import sys
+        sys.exit(0)
+
 
 
 if __name__ == "__main__":
