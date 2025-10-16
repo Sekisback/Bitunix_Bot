@@ -13,6 +13,7 @@ import pandas as pd
 import mplfinance as mpf
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
+
 # Pfade
 root_dir = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(root_dir))
@@ -37,8 +38,14 @@ class GridConfigGUI:
         self.api_config = Config()
         self.client_pub = OpenApiHttpFuturePublic(self.api_config)
         
-        # Daten
-        self.coins = []
+        # Pfade
+        self.root_dir = Path(__file__).parent.parent   # eine Ebene über /gui/
+        self.config_dir = self.root_dir / "configs"
+
+        # Flags
+        self.use_local_configs = False  # Start im API-Modus
+
+        # Auswahl
         self.selected_coin = tk.StringVar()
         self.selected_timeframe = tk.StringVar(value="15M")
         
@@ -50,9 +57,9 @@ class GridConfigGUI:
             "1M": "1m",
             "5M": "5m",
             "15M": "15m",
-            "1H": "1H",
-            "4H": "4H",
-            "1D": "1D"
+            "1H": "1h",
+            "4H": "4h",
+            "1D": "1d"
         }
         
         # Style für alle Comboboxen
@@ -61,9 +68,7 @@ class GridConfigGUI:
                     padding=4)  # Innenabstand oben/unten
         
         # Optional: Schriftgröße auch über Style
-        style.configure("TCombobox", 
-                    font=("Arial", 12),
-                    padding=8)
+        style.configure("TCombobox", padding=6)
         
         # Layout erstellen
         self._create_layout()
@@ -88,18 +93,9 @@ class GridConfigGUI:
         self.chart_frame = tk.Frame(self.root, bg="#1e1e1e")
         self.chart_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
-        # Placeholder für Chart
-        self.chart_label = tk.Label(
-            self.chart_frame, 
-            text="📊 Chart kommt hier hin...\n(Step 2)",
-            font=("Arial", 24),
-            bg="#1e1e1e",
-            fg="#ffffff"
-        )
-        self.chart_label.pack(expand=True)
-        
+       
         # ===== RECHTS: Menu-Bereich =====
-        self.menu_frame = tk.Frame(self.root, bg="#2b2b2b", width=300)
+        self.menu_frame = tk.Frame(self.root, bg="#1f1f1f", width=300)
         self.menu_frame.pack(side=tk.RIGHT, fill=tk.Y)
         self.menu_frame.pack_propagate(False)  # Fixiere Breite
         
@@ -110,7 +106,7 @@ class GridConfigGUI:
         """Erstellt das rechte Menu"""
         
         # Padding Container für alles
-        content = tk.Frame(self.menu_frame, bg="#2b2b2b")
+        content = tk.Frame(self.menu_frame, bg="#1f1f1f")
         content.pack(fill=tk.BOTH, expand=True, padx=15)
         
         # Header
@@ -118,7 +114,7 @@ class GridConfigGUI:
             content,
             text="GRID Bot Config",
             font=("Arial", 16, "bold"),
-            bg="#2b2b2b",
+            bg="#1f1f1f",
             fg="#ffffff",
             anchor="center"
         )
@@ -126,82 +122,74 @@ class GridConfigGUI:
         
         # Separator
         ttk.Separator(content, orient='horizontal').pack(fill='x', pady=(5, 0))
-        
-        # === COIN SELECTOR ===
-        coin_label = tk.Label(
-            content,
-            text="Coin auswählen:",
-            font=("Arial", 12),
-            bg="#2b2b2b",
-            fg="#ffffff",
-            anchor="w"
-        )
-        coin_label.pack(fill=tk.X, pady=(10, 5))
-        
+
+        # === COIN SELECTOR + MODE SWITCH (eine Zeile) ===
+        coin_row = tk.Frame(content, bg="#2b2b2b")
+        coin_row.pack(fill=tk.X, pady=(10, 10))
+
         self.coin_dropdown = ttk.Combobox(
-            content,
+            coin_row,
             textvariable=self.selected_coin,
             state="readonly",
-            width=32,  # 3 Buttons (10) + 2 Abstände (1+1)
-            font=("Arial", 11)
+            width=10,
+            font=("Arial", 14)
         )
-        self.coin_dropdown.pack(anchor="w")
+        self.coin_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         self.coin_dropdown.bind("<<ComboboxSelected>>", self._on_coin_select)
-        
-        # === TIMEFRAME SELECTOR ===
-        timeframe_label = tk.Label(
-            content,
+
+        self.mode_button = tk.Button(
+            coin_row,
+            text="🗂",
             font=("Arial", 12),
-            bg="#2b2b2b",
+            bg="#4a4a4a",
             fg="#ffffff",
-            anchor="w"
+            activebackground="#5c5c5c",
+            relief="raised",
+            bd=2,
+            width=2,
+            command=self._toggle_source_mode
         )
-        timeframe_label.pack(fill=tk.X, pady=(0, 5))
-        
-        # Timeframe Buttons Frame (2 Reihen)
+        self.mode_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0)
+
+
+        # === TIMEFRAME BUTTONS (alle 6 in einer Reihe, flach) ===
         tf_container = tk.Frame(content, bg="#2b2b2b")
-        tf_container.pack(anchor="w", pady=(0, 20))
+        tf_container.pack(fill=tk.X, pady=(5, 20))
+
+        # Alle 6 Buttons in einer Reihe mit Grid für gleiche Größe
+        tf_row = tk.Frame(tf_container, bg="#2b2b2b")
+        tf_row.pack(fill=tk.X)
         
-        # Erste Reihe: 1M, 5M, 15M
-        tf_row1 = tk.Frame(tf_container, bg="#2b2b2b")
-        tf_row1.pack(anchor="w")
+        # Grid konfigurieren: 6 Spalten mit gleichem Gewicht
+        for col in range(6):
+            tf_row.grid_columnconfigure(col, weight=1, uniform="tf")
         
-        for tf in ["1M", "5M", "15M"]:
+        # Button-Größe: flach
+        btn_h = 1
+        
+        for i, tf in enumerate(["1M", "5M", "15M", "1H", "4H", "1D"]):
             btn = tk.Button(
-                tf_row1,
+                tf_row,
                 text=tf,
-                width=10,
-                font=("Arial", 10),
-                bg="#3d3d3d",
+                height=btn_h,
+                font=("Arial", 10, "bold"),
+                bg="#3a3a3a",
                 fg="#ffffff",
-                activebackground="#4d4d4d",
+                activebackground="#5c5c5c",
+                relief="flat",
                 command=lambda t=tf: self._on_timeframe_select(t)
             )
-            btn.pack(side=tk.LEFT, padx=2, pady=2)
-        
-        # Zweite Reihe: 1H, 4H, 1D
-        tf_row2 = tk.Frame(tf_container, bg="#2b2b2b")
-        tf_row2.pack(anchor="w")
-        
-        for tf in ["1H", "4H", "1D"]:
-            btn = tk.Button(
-                tf_row2,
-                text=tf,
-                width=10,
-                font=("Arial", 10),
-                bg="#3d3d3d",
-                fg="#ffffff",
-                activebackground="#4d4d4d",
-                command=lambda t=tf: self._on_timeframe_select(t)
-            )
-            btn.pack(side=tk.LEFT, padx=2, pady=2)
-               
+            # Grid-Position: Zeile 0, Spalte i, mit 2px Abstand
+            padx = (0, 2) if i < 5 else (0, 0)
+            btn.grid(row=0, column=i, sticky="ew", padx=padx)
+
+                    
         # === STATUS ===
         self.status_label = tk.Label(
             content,
             text="ℹ️ Bereit...",
             font=("Arial", 10),
-            bg="#2b2b2b",
+            bg="#1f1f1f",
             fg="#888888",
             wraplength=260,
             justify=tk.LEFT,
@@ -233,8 +221,8 @@ class GridConfigGUI:
             self.coin_dropdown['values'] = self.coins
             
             # Default: BTCUSDT wenn vorhanden
-            if "ONDOUSDT" in self.coins:
-                self.coin_dropdown.set("ONDOUSDT")
+            if "BTCUSDT" in self.coins:
+                self.coin_dropdown.set("BTCUSDT")
             elif self.coins:
                 self.coin_dropdown.set(self.coins[0])
             
@@ -248,14 +236,57 @@ class GridConfigGUI:
             self._update_status(f"❌ Fehler: {e}")
             print(f"Error loading coins: {e}")
     
+    def _toggle_source_mode(self):
+        """Zwischen API-Mode und lokalem Config-Mode umschalten"""
+        self.use_local_configs = not self.use_local_configs
+
+        if self.use_local_configs:
+            self._update_status("📂 Lokale Configs geladen")
+            self.mode_button.config(text="🌐")
+            self._load_local_configs()
+        else:
+            self._update_status("🌐 Lade Coins von Bitunix API...")
+            self.mode_button.config(text="🗂")
+            self._load_coins()
+
+
+    def _load_local_configs(self):
+        """Lädt YAML-Dateien aus dem Config-Ordner"""
+        try:
+            yaml_files = sorted([f.name for f in self.config_dir.glob("*.yaml")])
+            self.coin_dropdown["values"] = yaml_files
+            if yaml_files:
+                self.coin_dropdown.set(yaml_files[0])
+                self._on_coin_select(None)
+            else:
+                self._update_status("❌ Keine YAML-Dateien gefunden")
+        except Exception as e:
+            self._update_status(f"❌ Fehler beim Laden: {e}")
+
+
     def _on_coin_select(self, event):
-        """Callback wenn Coin ausgewählt wird"""
-        coin = self.selected_coin.get()
-        tf = self.selected_timeframe.get()
-        self._update_status(f"📊 {coin} | {tf}")
-        
-        # Chart laden
-        self._load_chart()
+        """Reagiert auf Auswahl im Dropdown"""
+        name = self.selected_coin.get()
+
+        if self.use_local_configs and name.endswith(".yaml"):
+            file_path = self.config_dir / name
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f)
+                coin = cfg.get("symbol", "").strip('"')
+                if not coin:
+                    self._update_status("⚠️ Kein Symbol in YAML gefunden")
+                    return
+                self._update_status(f"📂 {name} geladen ({coin})")
+                self._load_chart()
+            except Exception as e:
+                self._update_status(f"❌ YAML-Fehler: {e}")
+        else:
+            # Normaler Coin von API
+            coin = name
+            self._update_status(f"📊 {coin} | {self.selected_timeframe.get()}")
+            self._load_chart()
+
     
     def _on_timeframe_select(self, timeframe):
         """Callback wenn Timeframe ausgewählt wird"""
@@ -271,7 +302,7 @@ class GridConfigGUI:
         threading.Thread(target=self._load_chart_thread, daemon=True).start()
 
     def _load_chart_thread(self):
-        """Lädt Daten im Hintergrund, zeichnet Chart im Main-Thread"""
+        """Lädt Daten im Hintergrund, aktualisiert Chart im Main-Thread"""
         coin = self.selected_coin.get()
         tf = self.selected_timeframe.get()
         if not coin:
@@ -292,11 +323,9 @@ class GridConfigGUI:
             if "quoteVol" in df.columns:
                 df.rename(columns={"quoteVol": "volume"}, inplace=True)
 
-            # ⚙️ Fix für FutureWarning
             df["timestamp"] = pd.to_numeric(df["timestamp"], errors="coerce")
             df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
             df.set_index("timestamp", inplace=True)
-
             for col in ["open", "high", "low", "close", "volume"]:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
             df.dropna(inplace=True)
@@ -305,63 +334,96 @@ class GridConfigGUI:
                 self._update_status("❌ Keine gültigen Daten")
                 return
 
-            # Chart-Zeichnung IM MAIN-THREAD ausführen
-            self.root.after(0, lambda: self._draw_chart(df, coin, tf))
+            # Update im Main-Thread
+            self.root.after(0, lambda: self._update_chart(df, coin, tf))
 
         except Exception as e:
             self._update_status(f"❌ Fehler: {e}")
             import traceback; traceback.print_exc()
-    
-    def _draw_chart(self, df, coin, tf):
-        """Zeichnet Chart im GUI-Thread (TradingView-Stil, kompakt ohne Rand)"""
+
+
+    def _update_chart(self, df, coin, tf):
+        """Aktualisiert bestehenden Chart im TradingView-Style ohne Flackern"""
         import matplotlib.pyplot as plt
 
-        # Alten Canvas entfernen
-        if self.chart_canvas:
-            self.chart_canvas.get_tk_widget().destroy()
-        if hasattr(self, "chart_label") and self.chart_label.winfo_exists():
-            self.chart_label.destroy()
+        # Chart beim ersten Aufruf initialisieren
+        if not hasattr(self, "fig"):
+            self.fig, self.ax = plt.subplots(figsize=(9, 4.5), dpi=100, facecolor="#2e2e2e")
+            self.ax.set_facecolor("#2e2e2e")
 
-        # 🎨 Etwas hellerer Hintergrund (#121212 → #1c1c1c)
-        fig, ax = plt.subplots(figsize=(9, 4.5), dpi=100, facecolor="#1c1c1c")
-        ax.set_facecolor("#1c1c1c")
+            # Stil
+            for spine in self.ax.spines.values():
+                spine.set_visible(False)
+            self.ax.grid(True, axis="y", color="#333333", linestyle="-", linewidth=0.4)
+            self.ax.grid(False, axis="x")
+            self.ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
+            self.ax.title.set_color("#ffffff")
 
+            # Canvas einmalig erstellen
+            self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
+            self.chart_canvas.draw()
+            self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Chart plotten auf definierter Achse
+        # === Update ohne Neuzeichnen des Canvas ===
+        self.ax.clear()
+
+        # === Kerzenfarben definieren ===
+        mc = mpf.make_marketcolors(
+            up='#3172e5',       # ⬆️ steigende Candle -> rot
+            down='#b8b8b8',   # ⬇️ fallende Candle -> grün
+            wick={'up':'#3172e5','down':'#b8b8b8'},
+            edge='inherit',
+            volume='inherit'
+        )
+
+        # Stil mit diesen Farben kombinieren
+        s = mpf.make_mpf_style(
+            base_mpf_style='nightclouds',
+            marketcolors=mc
+        )
+
+        # Format: Uhrzeit für < 1 Tag, Datum für 1D
+        time_format = "%H:%M" if tf != "1D" else "%d.%b"
+
         mpf.plot(
             df.sort_index(ascending=True),
             type="candle",
-            style="nightclouds",
-            ax=ax,
+            style=s,
+            ax=self.ax,
             volume=False,
-            datetime_format="%H:%M",
-            xrotation=0,
+            datetime_format=time_format,
+            xrotation=0
         )
 
-        # === TradingView-Style ===
-        for spine in ax.spines.values():
+        # === TradingView-Look ===
+        # Kein Y-Label
+        self.ax.set_ylabel("")
+
+        # Kein Rahmen
+        for spine in self.ax.spines.values():
             spine.set_visible(False)
 
-        ax.grid(True, axis="y", color="#333333", linestyle="-", linewidth=0.4)
-        ax.grid(False, axis="x")
+        # Horizontale Linien leicht gestrichelt
+        self.ax.grid(True, axis="y", color="#404040", linestyle="--", linewidth=0.6)
+        # Vertikale Linien aus
+        self.ax.grid(False, axis="x")
 
-        ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
-        ax.title.set_color("#ffffff")
+        # Achsen-Ticks
+        self.ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
+        self.ax.title.set_color("#ffffff")
 
-        # Kein zusätzlicher Rand
-        fig.subplots_adjust(left=0.03, right=0.985, top=0.94, bottom=0.04)
-        ax.margins(x=0.02, y=0.05)
+        # Weniger Rand unten
+        self.ax.margins(x=0.02, y=0.05)
+        self.fig.subplots_adjust(left=0.05, right=0.985, top=0.99, bottom=0.04)
 
-        # Canvas in GUI einbetten
-        self.chart_canvas = FigureCanvasTkAgg(fig, master=self.chart_frame)
+
+        # Flackerfreies Redraw
         self.chart_canvas.draw()
-        self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-        # Status & Auto-Refresh
+        # Status + Auto-Refresh
         self._update_status(f"✅ {coin} | {tf} | {len(df)} Bars")
         if self._running:
             self._after_id = self.root.after(30000, self._load_chart)
-
 
     def _update_status(self, message):
         """Aktualisiert Status-Label"""

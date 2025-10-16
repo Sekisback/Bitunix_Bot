@@ -1,0 +1,277 @@
+symbol:
+  type: str
+  default: "BASECOIN"
+  description: "Platzhalter, wird in Coin-Config überschrieben"
+
+# -----------------------------------------------------------------------------
+# 🧠 SYSTEMKONFIGURATION
+# -----------------------------------------------------------------------------
+system:
+  debug:
+    type: bool
+    default: false
+    description: "Erweiterte Debug-Ausgaben aktivieren"
+  update_interval:
+    type: int
+    default: 5
+    min: 1
+    max: 60
+    description: "Sekunden zwischen Grid-Updates im Hauptloop"
+  reconnect_interval:
+    type: int
+    default: 5
+    min: 1
+    max: 60
+    description: "Sekunden zwischen Reconnects (z.B. bei WebSocket)"
+  backtest_bars:
+    type: int
+    default: 200
+    min: 10
+    max: 1000
+    description: "Max. Anzahl historischer Bars (Bitunix-Limit)"
+  timezone_offset:
+    type: int
+    default: 2
+    min: -12
+    max: 12
+    description: "Zeitzonen-Offset (z. B. Europa/Berlin = +2)"
+  log_to_file:
+    type: bool
+    default: true
+    description: "Logs zusätzlich in Datei schreiben"
+  log_level:
+    type: select
+    options: ["DEBUG", "INFO", "WARNING", "ERROR"]
+    default: "INFO"
+    description: "Log-Level für Konsolenausgabe und Datei"
+
+# -----------------------------------------------------------------------------
+# 🧾 LOGGING-EINSTELLUNGEN
+# -----------------------------------------------------------------------------
+logging:
+  log_dir:
+    type: str
+    default: "logs"
+    description: "Zielverzeichnis für Log-Dateien"
+  filename_pattern:
+    type: str
+    default: "GRID_{symbol}_{date}.log"
+    description: "Muster für Log-Dateinamen"
+  rotate_daily:
+    type: bool
+    default: true
+    description: "Tägliche Logrotation aktivieren"
+  max_size_mb:
+    type: int
+    default: 10
+    min: 1
+    max: 100
+    description: "Maximale Größe pro Log-Datei (MB)"
+
+# -----------------------------------------------------------------------------
+# ⚙️ TRADING-GRUNDEINSTELLUNGEN
+# -----------------------------------------------------------------------------
+trading:
+  dry_run:
+    type: bool
+    default: true
+    description: "Simulation ohne echte Orders"
+  grid_direction:
+    type: select
+    options: ["long", "short", "both"]
+    default: "both"
+    description: "Handelsrichtung"
+  client_id_prefix:
+    type: str
+    default: "GRID"
+    description: "Präfix für Client-Order-IDs"
+
+# -----------------------------------------------------------------------------
+# 📊 GRID-PARAMETER
+# -----------------------------------------------------------------------------
+grid:
+  upper_price:
+    type: float
+    default: 20.0
+    description: "Obere Preisgrenze des Grids"
+
+  lower_price:
+    type: float
+    default: 10.0
+    description: "Untere Preisgrenze des Grids"
+
+  grid_levels:
+    type: int
+    default: 10
+    min: 2
+    max: 200
+    description: "Anzahl der Gitterlinien"
+
+  grid_mode:
+    type: select
+    options: ["arithmetic", "geometric"]
+    default: "arithmetic"
+
+  min_price_step:
+    type: float
+    default: 0.0000001
+    description: "Minimales Tick-Intervall bei geometric mode"
+
+  base_order_size:
+    type: float
+    default: 0.01
+    description: "Grund-Ordergröße"
+
+  active_rebuy:
+    type: bool
+    default: true
+    description: "Nach Fill erneut Order platzieren"
+
+  tp_mode:
+    type: select
+    options: ["percent", "next_grid"]
+    default: "next_grid"
+    description: "Art der Gewinnmitnahme"
+
+  take_profit_pct:
+    type: float
+    default: 0.003
+    visible_if:
+      tp_mode: "percent"     # nur anzeigen, wenn tp_mode = percent
+    description: "Nur aktiv, wenn tp_mode = percent"
+
+  sl_mode:
+    type: select
+    options: ["percent", "fixed", "none"]
+    default: "percent"
+    description: "Stop-Loss-Modus"
+
+  stop_loss_pct:
+    type: float
+    default: 0.01
+    visible_if:
+      sl_mode: "percent"
+    description: "Nur aktiv, wenn sl_mode = percent"
+
+  stop_loss_price:
+    type: float
+    default: 0.8
+    visible_if:
+      sl_mode: "fixed"
+    description: "Nur aktiv, wenn sl_mode = fixed"
+
+  rebalance_interval:
+    type: int
+    default: 300
+    description: "Sekunden zwischen automatischem Rebalancing"
+
+# -----------------------------------------------------------------------------
+# 💸 GEBÜHREN
+# -----------------------------------------------------------------------------
+risk:
+  include_fees:
+    type: bool
+    default: false
+    description: "Ordergröße berücksichtigt Gebühren"
+
+  fee_side:
+    type: select
+    options: ["maker", "taker"]
+    default: "maker"
+    
+  maker_fee_pct:
+    type: float
+    default: 0.00014
+
+  taker_fee_pct:
+    type: float
+    default: 0.00014
+
+# -----------------------------------------------------------------------------
+# 🛡️ HEDGE MANAGEMENT
+# -----------------------------------------------------------------------------
+hedge:
+  enabled:
+    type: bool
+    default: true
+    description: "Hedge aktivieren oder deaktivieren"
+
+  preemptive_hedge:
+    type: bool
+    default: true
+    visible_if:
+      enabled: true
+    description: "Präventiver Hedge bei offenen Grid-Orders"
+
+  mode:
+    type: select
+    options: ["direct", "dynamic", "reversal"]
+    default: "direct"
+    visible_if:
+      enabled: true
+    description: "Hedge-Strategie-Modus"
+
+  trigger_offset:
+    type: float
+    default: 1.0
+    visible_if:
+      enabled: true
+    description: "Multiplikator auf grid_step"
+
+  partial_levels:
+    type: list
+    subtype: float
+    default: [0.5, 0.75, 1.0]
+    visible_if:
+      mode: "dynamic"
+    description: "Nur bei dynamic relevant"
+
+  close_on_reentry:
+    type: bool
+    default: true
+    visible_if:
+      enabled: true
+    description: "Hedge schließen, wenn Preis wieder in Range"
+
+  size_mode:
+    type: select
+    options: ["net_position", "fixed"]
+    default: "net_position"
+    visible_if:
+      enabled: true
+    description: "Hedge-Größenmodus"
+
+  fixed_size_ratio:
+    type: float
+    default: 0.5
+    visible_if:
+      size_mode: "fixed"
+    description: "Nur relevant bei size_mode = fixed"
+
+# -----------------------------------------------------------------------------
+# 💰 MARGIN- UND HEBELKONFIGURATION
+# -----------------------------------------------------------------------------
+margin:
+  mode:
+    type: select
+    options: ["ISOLATION", "CROSS"]
+    default: "ISOLATION"
+
+  leverage:
+    type: int
+    default: 3
+    min: 1
+    max: 125
+    
+  auto_reduce_only:
+    type: bool
+    default: false
+
+# -----------------------------------------------------------------------------
+# 🧩 STRATEGIEVERHALTEN
+# -----------------------------------------------------------------------------
+strategy:
+  entry_on_touch:
+    type: bool
+    default: true
+    description: "Order beim Preis-Touch platzieren"
