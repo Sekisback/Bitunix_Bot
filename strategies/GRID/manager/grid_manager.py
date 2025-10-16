@@ -616,31 +616,31 @@ class GridManager:
             f"{'🛡️ === DRY-RUN === 🛡️' if self.trading.dry_run else '⚠️ === REAL MODE === ⚠️'}"
         )
         self.logger.info("=" * 60)
-        self.logger.info(f"Direction : {self.grid_direction.upper()}")
-        self.logger.info(f"Margin Mode: {self.margin_mode.upper()}")
-        self.logger.info(f"Leverage : {self.leverage}")
-        self.logger.info(f"Mode : {self.grid_conf.grid_mode.value}")
+        self.logger.info(f"Direction    : {self.grid_direction.upper()}")
+        self.logger.info(f"Margin Mode  : {self.margin_mode.upper()}")
+        self.logger.info(f"Leverage     : {self.leverage}")
+        self.logger.info(f"Mode         : {self.grid_conf.grid_mode.value}")
         self.logger.info(
-            f"Levels : {len(self.levels)} "
+            f"Levels       : {len(self.levels)} "
             f"({self.grid_conf.lower_price} → {self.grid_conf.upper_price})"
         )
-        self.logger.info(f"Base Size : {self.grid_conf.base_order_size}")
-        self.logger.info(f"Active Rebuy: {self.grid_conf.active_rebuy}")
+        self.logger.info(f"Base Size    : {self.grid_conf.base_order_size}")
+        self.logger.info(f"Active Rebuy : {self.grid_conf.active_rebuy}")
         
         try:
             risk_info = self.risk_manager.get_risk_summary()
-            self.logger.info(f"Take Profit: {risk_info['tp_mode']}")
+            self.logger.info(f"Take Profit  : {risk_info['tp_mode']}")
             if risk_info.get('tp_pct'):
-                self.logger.info(f"TP % : {risk_info['tp_pct']*100:.2f}%")
-            self.logger.info(f"Stop Loss : {risk_info['sl_mode']}")
+                self.logger.info(f"TP %         : {risk_info['tp_pct']*100:.2f}%")
+            self.logger.info(f"Stop Loss    : {risk_info['sl_mode']}")
             if risk_info.get('sl_pct'):
-                self.logger.info(f"SL % : {risk_info['sl_pct']*100:.2f}%")
+                self.logger.info(f"SL %         : {risk_info['sl_pct']*100:.2f}%")
             if risk_info.get('sl_price'):
-                self.logger.info(f"SL Price : {risk_info['sl_price']}")
+                self.logger.info(f"SL Price     : {risk_info['sl_price']}")
             
             fee_info = self.risk_manager.get_fee_info()
             self.logger.info(
-                f"Fees : {'Included' if fee_info['include_fees'] else 'Ignored'} "
+                f"Fees             : {'Included' if fee_info['include_fees'] else 'Ignored'} "
                 f"({fee_info['fee_side']})"
             )
         except Exception as e:
