@@ -7,7 +7,7 @@ Zuständig für:
 - Position-Close Handling (TP/SL)
 - Order-Cancel Handling
 - Net-Position Tracking
-- Rebuy-Logik
+- Rebuy-Logik mit Mindestabstand
 """
 
 import logging
@@ -129,7 +129,8 @@ class PositionTracker:
     def handle_position_close(
         self,
         position_data: Dict[str, Any],
-        levels: List[GridLevel]
+        levels: List[GridLevel],
+        current_price: Optional[float] = None
     ) -> None:
         """
         Behandelt geschlossene Positionen (TP/SL getriggert)
@@ -137,6 +138,7 @@ class PositionTracker:
         Args:
             position_data: Position-Daten vom Exchange
             levels: Liste aller Grid-Levels
+            current_price: Aktueller Marktpreis (für Rebuy-Check)
         """
         try:
             # Entry-Preis aus Position-Daten
@@ -167,18 +169,50 @@ class PositionTracker:
                 f"→ Position geschlossen, Level FREI"
             )
             
-            # Rebuy wenn aktiviert
+            # ✅ Rebuy wenn aktiviert UND Preis weit genug weg
             if self.grid_conf.active_rebuy and not matched_level.position_open:
-                self.logger.debug(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                # Prüfe ob Preis weit genug weg ist
+                should_rebuy = False
                 
-                # Kurze Pause damit Position vollständig geschlossen ist
-                import time
-                time.sleep(0.1)
+                if current_price is not None:
+                    # Mindestabstand = 1 Grid-Step (berechnet aus levels)
+                    if len(levels) > 1:
+                        # Finde nächstes Level für Step-Berechnung
+                        sorted_prices = sorted([l.price for l in levels])
+                        if len(sorted_prices) >= 2:
+                            min_distance = abs(sorted_prices[1] - sorted_prices[0])
+                            
+                            # BUY: Preis muss mindestens 1 Step ÜBER Level sein
+                            # SELL: Preis muss mindestens 1 Step UNTER Level sein
+                            if matched_level.side == "BUY":
+                                should_rebuy = current_price >= (matched_level.price + min_distance)
+                            elif matched_level.side == "SELL":
+                                should_rebuy = current_price <= (matched_level.price - min_distance)
+                            
+                            if not should_rebuy:
+                                self.logger.debug(
+                                    f"🔄 Rebuy @ {matched_level.price:.4f} wartet auf Preis "
+                                    f"(aktuell {current_price:.4f}, benötigt ±{min_distance:.4f})"
+                                )
+                else:
+                    # Kein Preis bekannt → Standard-Verhalten (Entry-on-Touch kümmert sich)
+                    should_rebuy = False
+                    self.logger.debug(
+                        f"🔄 Rebuy @ {matched_level.price:.4f} wird von Entry-on-Touch gehandelt"
+                    )
                 
-                try:
-                    self.order_executor.place_entry_order(matched_level)
-                except Exception as rebuy_err:
-                    self.logger.error(f"❌ Rebuy failed: {rebuy_err}")
+                # Nur platzieren wenn Preis weit genug weg
+                if should_rebuy:
+                    self.logger.debug(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                    
+                    # Kurze Pause damit Position vollständig geschlossen ist
+                    import time
+                    time.sleep(0.1)
+                    
+                    try:
+                        self.order_executor.place_entry_order(matched_level)
+                    except Exception as rebuy_err:
+                        self.logger.error(f"❌ Rebuy failed: {rebuy_err}")
             
             # Net-Position updaten
             self.update_net_position()

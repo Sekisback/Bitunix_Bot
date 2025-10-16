@@ -119,15 +119,20 @@ class GridBot:
                         base_size = self.grid.risk_manager.calculate_effective_size()
                         net_pos = net_risk * base_size
                         
-                        # 🛡️ Hedge-Status mit Preis
+                        # 🛡️ Hedge-Status mit Preis + SL
                         hedge_active = getattr(self.grid.hedge_manager, "active", False)
                         if hedge_active:
                             hedge_price = getattr(self.grid.hedge_manager, "current_hedge_price", None)
                             hedge_qty = getattr(self.grid.hedge_manager, "current_hedge_size", 0)
-                            hedge_str = f"🛡️  @{hedge_price:.4f} ({hedge_qty:.0f})" if hedge_price else "🛡️ "
+                            hedge_sl = getattr(self.grid.hedge_manager, "current_sl_price", None)
+                            if hedge_price:
+                                sl_str = f"SL: {hedge_sl:.4f}" if hedge_sl else ""
+                                hedge_str = f"🛡️  @ {hedge_price:.4f} {sl_str} ({hedge_qty:.0f})"
+                            else:
+                                hedge_str = "🛡️ "
                         else:
                             hedge_str = "⏸️ "
-                        
+                                                
                         # 💰 PnL-Daten vom VirtualOrderManager
                         if self.grid.trading.dry_run and self.grid.virtual_manager:
                             stats = self.grid.virtual_manager.get_stats()
@@ -137,11 +142,10 @@ class GridBot:
                             pnl = 0.0
                             wr = 0.0
                         
-                        # 🎯 ✅ VOLLSTÄNDIGE Log-Zeile (wie gewünscht)
+                        # 🎯 ✅ VOLLSTÄNDIGE Log-Zeile (mit SL)
                         logger.info(
                             f"💰 {self.symbol} @ {last_price:.4f} | "
                             f"Active: {active}/{total} | Filled: {filled} | "
-                            #f"Net: {net_pos:.2f} | "
                             f"Hedge: {hedge_str} | "
                             f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
                         )
@@ -249,10 +253,6 @@ class GridBot:
         """Periodischer OrderSync"""
         try:
             result = await self.grid.sync_orders()
-            # logger.info(
-            #     f"🔍 Auto-Sync: MATCHED={result['matched']} | "
-            #     f"MISSING={result['missing']} | OBSOLETE={result['obsolete']}"
-            # )
             
             # Hedge nach Sync aktualisieren
             if result['placed'] > 0:

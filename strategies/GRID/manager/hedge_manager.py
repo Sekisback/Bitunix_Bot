@@ -12,6 +12,7 @@ FIXES:
 
 import logging
 import time
+from typing import Optional
 from utils.exceptions import OrderPlacementError, InsufficientBalanceError
 
 class HedgeManager:
@@ -148,8 +149,16 @@ class HedgeManager:
         return abs(net_position) * fraction * multiplier
 
     # ----------------------------------------------------------------
-    def place_order(self, side: str, price: float, size: float):
-        """Platziert Hedge-Order mit Prüfung des PriceProtectScope."""
+    def place_order(self, side: str, price: float, size: float, sl_price: Optional[float] = None):
+        """
+        Platziert Hedge-Order mit Stop-Loss
+        
+        Args:
+            side: "BUY" oder "SELL"
+            price: Limit-Preis
+            size: Ordergröße
+            sl_price: Stop-Loss-Preis (optional)
+        """
         if size <= 0:
             self.logger.warning("[HEDGE] ❌ Ungültige Hedge-Größe (0)")
             return
@@ -176,35 +185,54 @@ class HedgeManager:
             return
 
         if self.dry_run:
-            self.logger.debug(f"[HEDGE] (Dry) place_order() @ {price:.6f}")
+            sl_str = f" | SL={sl_price:.4f}" if sl_price else ""
+            self.logger.debug(f"[HEDGE] (Dry) place_order() @ {price:.6f}{sl_str}")
+            
+            # ✅ NEU: Auch im Dry-Run Status setzen
+            self.current_hedge_price = price
+            self.current_hedge_size = size
+            self.current_sl_price = sl_price
+            self.active = True
             return
 
         try:
-            order_id = self.api_client.place_order(
-                symbol=self.symbol,
-                side=side,
-                order_type="LIMIT",
-                qty=size,
-                price=price,
-                trade_side="OPEN",
-                client_id=f"HEDGE_{int(time.time())}"
-            )
-            self.logger.info(f"[HEDGE] ✅ Hedge-Order platziert → ID={order_id}")
+            # ✅ NEU: Mit Stop-Loss
+            order_params = {
+                "symbol": self.symbol,
+                "side": side,
+                "order_type": "LIMIT",
+                "qty": size,
+                "price": price,
+                "trade_side": "OPEN",
+                "client_id": f"HEDGE_{int(time.time())}"
+            }
+            
+            # SL hinzufügen wenn vorhanden
+            if sl_price:
+                order_params["sl_price"] = sl_price
+                order_params["sl_stop_type"] = "MARK_PRICE"
+            
+            order_id = self.api_client.place_order(**order_params)
+            
+            # ✅ NEU: Status speichern für Anzeige
+            self.current_hedge_price = price
+            self.current_hedge_size = size
+            self.current_sl_price = sl_price
             self.active = True
+            
+            sl_info = f" | SL={sl_price:.4f}" if sl_price else ""
+            self.logger.info(f"[HEDGE] ✅ Hedge-Order → ID={order_id}{sl_info}")
         
-        # ✅ FIX: Spezifisches Error-Handling
         except OrderPlacementError as e:
             self.logger.error(f"[HEDGE] ❌ Order-Placement-Fehler: {e}")
-            raise  # Nach oben durchreichen
+            raise
         
         except InsufficientBalanceError as e:
             self.logger.error(f"[HEDGE] ❌ Zu wenig Balance: {e}")
-            # Nicht fatal - Hedge überspringen
             return
         
         except Exception as e:
             self.logger.exception(f"[HEDGE] ❌ Unerwarteter Fehler beim Platzieren: {e}")
-            # Logging aber nicht crashen
 
     # ----------------------------------------------------------------
     def close(self):
@@ -225,11 +253,11 @@ class HedgeManager:
 
     # ----------------------------------------------------------------
     def update_preemptive_hedge(self, dry_run: bool = False, 
-                           lower_bound: float = None, upper_bound: float = None, 
-                           step: float = None, current_price: float = None,
-                           grid_levels: list = None, base_size: float = 20.0):
+                       lower_bound: float = None, upper_bound: float = None, 
+                       step: float = None, current_price: float = None,
+                       grid_levels: list = None, base_size: float = 20.0):
         """
-        Passt präventiven Hedge an.
+        Passt präventiven Hedge an mit Stop-Loss
         
         Risiko = Offene Orders unter/über Preis + Gefüllte ohne TP
         """
@@ -246,7 +274,7 @@ class HedgeManager:
 
         grid_mode = getattr(self.config, "grid_direction", "long")
         
-        # ✅ Risiko-Berechnung
+        # ✅ Risiko-Berechnung + SL-Berechnung
         if grid_mode == "long":
             # Offene Orders UNTER Preis
             active_orders_below = [
@@ -263,6 +291,7 @@ class HedgeManager:
             risk_count = len(active_orders_below) + len(filled_without_tp)
             hedge_side = "SELL"
             hedge_price = lower_bound - step
+            sl_price = hedge_price + (2 * step)  # ✅ SL ÜBER Hedge
             
         elif grid_mode == "short":
             active_orders_above = [
@@ -278,6 +307,7 @@ class HedgeManager:
             risk_count = len(active_orders_above) + len(filled_without_tp)
             hedge_side = "BUY"
             hedge_price = upper_bound + step
+            sl_price = hedge_price - (2 * step)  # ✅ SL UNTER Hedge
         else:
             return
         
@@ -288,12 +318,6 @@ class HedgeManager:
 
         if current_state != last_logged_state:
             self._last_hedge_log = current_state
-            # self.logger.info(
-            #     f"[HEDGE] 📊 @ {current_price:.4f}: "
-            #     f"Orders={'unter' if grid_mode=='long' else 'über'} Preis={len(active_orders_below if grid_mode=='long' else active_orders_above)} | "
-            #     f"Filled ohne TP={len(filled_without_tp)} | "
-            #     f"Gesamt={risk_count} → Hedge={target_qty:.2f} USDT"
-            # )
         
         # Kein Risiko → Hedge schließen
         if target_qty < 0.001:
@@ -317,10 +341,12 @@ class HedgeManager:
                         try:
                             self.api_client.modify_order(
                                 order_id=self.hedge_order_id,
-                                qty=str(target_qty)
+                                qty=str(target_qty),
+                                sl_price=str(sl_price)  # ✅ SL auch bei Modify
                             )
                             self.current_hedge_size = target_qty
-                            self.logger.info(f"[HEDGE] ✅ Qty angepasst")
+                            self.current_sl_price = sl_price  # ✅ SL speichern
+                            self.logger.info(f"[HEDGE] ✅ Qty + SL angepasst (SL={sl_price:.4f})")
                         except Exception as e:
                             self.logger.error(f"[HEDGE] ❌ Modify failed: {e}")
                             # Fallback: Close + neu platzieren
@@ -328,34 +354,42 @@ class HedgeManager:
                             self.active = False
                     else:
                         self.current_hedge_size = target_qty
+                        self.current_sl_price = sl_price  # ✅ SL auch im Dry-Run
             return
         
-        # ✅ Neuer Hedge → Platzieren
-        # KEINE PriceProtect-Prüfung hier! (macht grid_manager)
-        
+        # ✅ Neuer Hedge → Platzieren mit SL
         if not hedge_price or hedge_price <= 0:
             return
-        
-        #self.logger.info(f"[HEDGE] 🚀 {hedge_side} {target_qty:.2f} @ {hedge_price:.6f}")
         
         if dry_run:
             self.active = True
             self.current_hedge_size = target_qty
             self.current_hedge_price = hedge_price
+            self.current_sl_price = sl_price  # ✅ SL im Dry-Run
             return
         
         try:
             result = self.api_client.place_order(
-                symbol=self.symbol, side=hedge_side, order_type="LIMIT",
-                qty=target_qty, price=hedge_price, trade_side="OPEN",
-                client_id=f"HEDGE_{int(time.time())}"
+                symbol=self.symbol, 
+                side=hedge_side, 
+                order_type="LIMIT",
+                qty=target_qty, 
+                price=hedge_price, 
+                trade_side="OPEN",
+                client_id=f"HEDGE_{int(time.time())}",
+                sl_price=sl_price,              # ✅ SL übergeben
+                sl_stop_type="MARK_PRICE"       # ✅ SL-Typ
             )
             
             self.hedge_order_id = result.get("orderId")
             self.current_hedge_size = target_qty
             self.current_hedge_price = hedge_price
+            self.current_sl_price = sl_price  # ✅ SL speichern
             self.active = True
             
-            self.logger.info(f"[HEDGE] ✅ Order ID={self.hedge_order_id}")
+            self.logger.info(
+                f"[HEDGE] ✅ Order ID={self.hedge_order_id} | "
+                f"Preis={hedge_price:.4f} | SL={sl_price:.4f}"
+            )
         except Exception as e:
             self.logger.error(f"[HEDGE] ❌ Fehler: {e}")
