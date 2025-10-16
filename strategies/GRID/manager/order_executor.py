@@ -72,7 +72,8 @@ class OrderExecutor:
         self.calculator = calculator
         self.trading = trading_config
         self.virtual_manager = virtual_manager
-        self.logger = logger or logging.getLogger("OrderExecutor")
+        # ✅ FIX: Nutze GridManager-Logger statt eigenen
+        self.logger = logger or logging.getLogger("GridManager")
         
         # Tracking
         self._initial_orders_placed = False
@@ -136,7 +137,7 @@ class OrderExecutor:
         price_str = f"@ Preis {current_price:.4f}" if current_price else "(kein Preis)"
         
         self.logger.info(
-            f"[ORDER] {placed_count}/{len(levels)} Grid-Orders platziert, "
+            f"[ORDER]   {placed_count}/{len(levels)} Grid-Orders platziert, "
             f"{skipped_count} übersprungen {price_str} ({mode})"
         )
         
@@ -195,7 +196,7 @@ class OrderExecutor:
                         placed_count += 1
                     except Exception as e:
                         self.logger.error(f"❌ Entry-Order @ {lvl.price} failed: {e}")
-        
+                
         return placed_count
 
     # =========================================================================
@@ -247,8 +248,8 @@ class OrderExecutor:
             sl_str = f"{sl:.4f}" if sl else "None"
             
             self.logger.info(
-                f"[VIRTUAL] 🟢 {level.side} @ {level.price:.4f} | "
-                f"size={size} | TP={tp_str} | SL={sl_str}"
+                f"[VIRTUAL] 🟢 Limit Order {level.side} @ {level.price:.4f} | "
+                f"size={size} | TP={tp_str} | SL={sl_str} aktiviert"
             )
             return
 

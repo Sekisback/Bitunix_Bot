@@ -67,11 +67,22 @@ class PositionTracker:
         
         # Net-Position Tracking
         self.net_position_size = 0.0
+        self._levels: List[GridLevel] = []  # ✅ NEU: Levels-Storage
         
         # Stats
         self.total_fills = 0
         self.total_closes = 0
         self.total_cancels = 0
+
+    def set_levels(self, levels: List[GridLevel]) -> None:
+        """
+        Setzt/Aktualisiert die Grid-Levels
+        
+        Args:
+            levels: Liste von GridLevel-Objekten
+        """
+        self._levels = levels
+        self.logger.debug(f"Levels aktualisiert: {len(levels)} Levels")
 
     # =========================================================================
     # Fill-Handling
@@ -232,8 +243,9 @@ class PositionTracker:
         if levels is not None:
             self._levels = levels
         
-        if not hasattr(self, '_levels') or not self._levels:
-            self.logger.warning("⚠️ Keine Levels für Net-Position-Berechnung")
+        if not self._levels:
+            # ✅ FIX: Nur Debug statt Warning
+            self.logger.debug("⚠️ Keine Levels für Net-Position-Berechnung")
             return 0.0
         
         # Zähle gefüllte Long/Short
