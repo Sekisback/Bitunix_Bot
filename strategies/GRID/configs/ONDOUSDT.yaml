@@ -20,9 +20,9 @@ trading:
 # 📊 GRID-PARAMETER
 # -----------------------------------------------------------------------------
 grid:
-  upper_price: 0.77                  # Obere Preisgrenze des Grids (Coin-spezifisch)
+  upper_price: 0.78                  # Obere Preisgrenze des Grids (Coin-spezifisch)
   lower_price: 0.75                 # Untere Preisgrenze des Grids (Coin-spezifisch)
-  grid_levels: 8                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
+  grid_levels: 12                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
 
   base_order_size: 20               # Grund-Ordergröße (Coin-spezifisch)
 
