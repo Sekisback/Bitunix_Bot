@@ -22,9 +22,9 @@ trading:
 grid:
   upper_price: 0.72                  # Obere Preisgrenze des Grids (Coin-spezifisch)
   lower_price: 0.62                 # Untere Preisgrenze des Grids (Coin-spezifisch)
-  grid_levels: 40                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
+  grid_levels: 80                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
 
-  base_order_size: 20               # Grund-Ordergröße (Coin-spezifisch)
+  base_order_size: 200               # Grund-Ordergröße (Coin-spezifisch)
 
   tp_mode: "next_grid"              # "percent" oder "next_grid"
   take_profit_pct: 0.03             # Nur aktiv, wenn tp_mode = "percent"

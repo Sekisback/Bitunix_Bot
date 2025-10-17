@@ -291,11 +291,10 @@ class GridManager:
                         
                         if matched_level:
                             pos_data = {"entryValue": matched_level.price}
-                            # ✅ FIX: Nutze position.close_price statt current_price!
                             self.position_tracker.handle_position_close(
                                 pos_data, 
                                 self.levels,
-                                position.close_price  # ← Jetzt 0.6800 statt 0.6825
+                                current_price
                             )
 
             # Initial Orders (nur einmal)
@@ -316,12 +315,13 @@ class GridManager:
                 if placed > 0:
                     self._update_and_hedge("entry_on_touch")
 
-            self._check_hedge_opportunity(current_price)
+            # ✅ GEÄNDERT: Direkt _update_and_hedge aufrufen statt _check_hedge_opportunity
+            self._update_and_hedge("price_update")
 
         except Exception as e:
             self.logger.error(f"Update-Fehler: {e}")
             self.lifecycle.set_state(GridState.ERROR, str(e))
-
+            
     # ========================================
     # Rebalancing
     # ========================================
@@ -380,125 +380,33 @@ class GridManager:
     # Hedge Management
     # ========================================
 
-    def _check_hedge_opportunity(self, current_price: float) -> None:
-        """Prüft ob Hedge platzierbar"""
-        now = time.time()
-    
-        if now - self._last_hedge_check < self._hedge_check_interval:
-            return
-        
-        if self._last_price_for_hedge:
-            price_change_pct = abs(current_price - self._last_price_for_hedge) / self._last_price_for_hedge
-            if price_change_pct < 0.01:
-                return
-        
-        self._last_hedge_check = now
-        self._last_price_for_hedge = current_price
-        
-        if getattr(self.hedge_manager, "active", False):
-            return
-        
-        # ✅ NEU: Nutze PositionTracker für Net-Position
-        net_pos = self.position_tracker.get_net_position()
-        if abs(net_pos) < 0.001:
-            return
-        
-        price_list = self.calculator.calculate_price_list()
-        lower_bound = price_list[0]
-        upper_bound = price_list[-1]
-        step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
-        
-        if self.grid_direction == "long":
-            hedge_price = lower_bound - step
-        elif self.grid_direction == "short":
-            hedge_price = upper_bound + step
-        else:
-            return
-        
-        scope = self.hedge_manager.price_protect_scope or 0.05
-        min_price = current_price * (1 - scope)
-        max_price = current_price * (1 + scope)
-        
-        is_within_scope = False
-        
-        if self.grid_direction == "long":
-            is_within_scope = hedge_price >= min_price
-        elif self.grid_direction == "short":
-            is_within_scope = hedge_price <= max_price
-        
-        if is_within_scope:
-            self.logger.info(
-                f"[HEDGE] 🎯 Preis jetzt in Range für Hedge! "
-                f"Live={current_price:.4f} | Hedge={hedge_price:.4f}"
-            )
-            self._update_and_hedge("price_in_range")
-
     def _update_and_hedge(self, trigger: str = "unknown"):
-        """Hedge-Verwaltung"""
+        """
+        Hedge-Verwaltung - Ruft check_trigger auf
+        
+        GEÄNDERT: Nur noch Trigger-Check, kein preemptive hedge
+        """
+        # Live-Preis holen
         current_price = getattr(self.hedge_manager, "live_price", None)
         if not current_price:
             return
         
+        # Grid-Bounds berechnen
         price_list = self.calculator.calculate_price_list()
         lower_bound = price_list[0]
         upper_bound = price_list[-1]
         step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
 
-        if self.grid_direction == "long":
-            hedge_price = lower_bound - step
-            hedge_side = "SELL"
-        elif self.grid_direction == "short":
-            hedge_price = upper_bound + step
-            hedge_side = "BUY"
-        else:
-            return
-
-        scope = self.hedge_manager.price_protect_scope or 0.05
-        # short
-        min_price = current_price * (1 - scope)
-        # long
-        max_price = current_price * (1 + scope)
+        # Net-Position für Hedge-Size
+        net_pos = self.position_tracker.get_net_position()
         
-        is_out_of_scope = False
-        required_price = None
-        
-        if hedge_side == "SELL" and hedge_price < min_price:
-            is_out_of_scope = True
-            required_price = hedge_price / (1 - scope)
-        elif hedge_side == "BUY" and hedge_price > max_price:
-            is_out_of_scope = True
-            required_price = hedge_price / (1 + scope)
-        
-        if is_out_of_scope:
-            last_warning = getattr(self, "_last_hedge_warning", None)
-            if last_warning != (hedge_price, trigger):
-                # ✅ FIX: Nur loggen wenn required_price existiert
-                if required_price is not None:
-                    self.logger.warning(
-                        f"💰 {self.symbol} ⏳ Hedge @ {hedge_price:.4f} außerhalb der Range @ {required_price:.4f} ({trigger})"
-                    )
-                else:
-                    # Fallback ohne required_price
-                    self.logger.warning(
-                        f"💰 {self.symbol} ⏳ Hedge @ {hedge_price:.4f} außerhalb der Range @ {required_price:.4f} ({trigger})"
-                    )
-                self._last_hedge_warning = (hedge_price, trigger)
-                self.hedge_manager.hedge_pending = True
-            return
-        
-        if getattr(self.hedge_manager, "hedge_pending", False):
-            self.logger.info(f"💰 {self.symbol} ✅ HEDGE Preis @ {hedge_price:.4f} jetzt in Range → Platziere Hedge")
-            self.hedge_manager.hedge_pending = False
-
-        # ✅ NEU: Übergebe Levels für Risiko-Berechnung
-        self.hedge_manager.update_preemptive_hedge(
-            dry_run=self.trading.dry_run,
+        # Trigger prüfen - macht intern Market Order wenn Preis außerhalb
+        self.hedge_manager.check_trigger(
+            price=current_price,
             lower_bound=lower_bound,
             upper_bound=upper_bound,
             step=step,
-            current_price=current_price,
-            grid_levels=self.levels,
-            base_size=self.risk_manager.calculate_effective_size()
+            net_position=net_pos
         )
 
     # ========================================
@@ -650,7 +558,7 @@ class GridManager:
             
             fee_info = self.risk_manager.get_fee_info()
             self.logger.info(
-                f"Fees           : {'Included' if fee_info['include_fees'] else 'Ignored'} "
+                f"Fees             : {'Included' if fee_info['include_fees'] else 'Ignored'} "
                 f"({fee_info['fee_side']})"
             )
         except Exception as e:
