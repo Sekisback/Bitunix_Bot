@@ -205,7 +205,7 @@ class GridConfigGUI:
         """Erstellt Chart-Canvas einmalig"""
         import matplotlib.pyplot as plt
         
-        self.fig, self.ax = plt.subplots(figsize=(9, 4.5), dpi=160, facecolor="#2e2e2e")
+        self.fig, self.ax = plt.subplots(figsize=(13, 9), dpi=120, facecolor="#2e2e2e")
         self.ax.set_facecolor("#2e2e2e")
         
         self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
