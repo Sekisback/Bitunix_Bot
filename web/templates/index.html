@@ -50,7 +50,23 @@
       return el.scrollHeight - el.scrollTop - el.clientHeight < 10;
     }
 
-    // Nach Laden: Scrollzustand wiederherstellen
+    // --- 🔁 Automatisches Log-Update ---
+    async function updateLogs(){
+      try {
+        const res = await fetch("/logs");
+        const data = await res.json();
+        const stick = atBottom(box);
+        box.textContent = data.logs.join("\n");
+        if (stick) toBottom();
+      } catch(e) {
+        console.error("⚠️ Log-Update fehlgeschlagen:", e);
+      }
+    }
+
+    // alle 60 Sekunden aktualisieren (60000 ms)
+    setInterval(updateLogs, 10000);
+
+    // --- 🧭 Scroll-Zustand merken & wiederherstellen ---
     window.addEventListener('load', () => {
       const stick = sessionStorage.getItem('stickBottom') === '1';
       const saved = parseInt(sessionStorage.getItem('logScroll') || '0', 10);
@@ -58,7 +74,6 @@
       else if (!isNaN(saved)) box.scrollTop = saved;
     });
 
-    // Beim Scrollen: Zustand merken
     box.addEventListener('scroll', () => {
       sessionStorage.setItem('logScroll', box.scrollTop);
       sessionStorage.setItem('stickBottom', atBottom(box) ? '1' : '0');

@@ -1,5 +1,5 @@
 from pathlib import Path
-from flask import Flask, render_template, redirect, url_for, request
+from flask import Flask, render_template, redirect, url_for, request, jsonify
 import subprocess, os, signal, sys
 from datetime import datetime
 
@@ -8,7 +8,7 @@ app = Flask(__name__)
 # Verzeichnisse robust bestimmen
 WEB_DIR   = Path(__file__).resolve().parent          # .../Bitunix_Trading_Bot/web
 ROOT_DIR  = WEB_DIR.parent                           # .../Bitunix_Trading_Bot
-STRAT_DIR = ROOT_DIR / "strategies" / "EMA_Touch"
+STRAT_DIR = ROOT_DIR / "strategies" / "GRID"
 
 bot_path    = STRAT_DIR / "bot.py"
 configs_dir = STRAT_DIR / "configs"
@@ -80,6 +80,19 @@ def stop():
     process = None
     current_config = None
     return redirect(url_for("index"))
+
+
+@app.route("/logs")
+def get_logs():
+    global current_config
+    logs = []
+    if current_config:
+        log_file = logs_dir / f"EMA_Touch_{current_config}_{datetime.now().strftime('%Y%m%d')}.log"
+        if log_file.exists():
+            with open(log_file, "r", errors="ignore") as f:
+                logs = f.read().splitlines()
+    return jsonify({"logs": logs})
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=8080)
