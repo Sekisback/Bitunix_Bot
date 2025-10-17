@@ -471,7 +471,7 @@ class GridManager:
             last_warning = getattr(self, "_last_hedge_warning", None)
             if last_warning != (hedge_price, trigger):
                 self.logger.warning(
-                    f"[HEDGE] ⏳ Hedge @ {hedge_price:.4f} außerhalb Scope "
+                    f"💰 {self.symbol} ⏳ HEDGE @ {hedge_price:.4f} außerhalb Scope "
                     f"({min_price:.4f} - {max_price:.4f})"
                     f" → Wartet auf Preis ~{required_price:.4f} ({trigger})"
                 )
