@@ -255,7 +255,7 @@ class GridBot:
             result = await self.grid.sync_orders()
             
             # Hedge nach Sync aktualisieren
-            if result['placed'] > 0:
+            if result.get('placed', 0) > 0:
                 self.grid._update_net_position()
                 price_list = self.grid.calculator.calculate_price_list()
                 lower_bound = price_list[0]
