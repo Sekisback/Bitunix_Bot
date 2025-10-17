@@ -64,16 +64,22 @@ class TradingConfig(BaseModel):
 class GridConfig(BaseModel):
     upper_price: float = Field(gt=0, description="Obere Preisgrenze")
     lower_price: float = Field(gt=0, description="Untere Preisgrenze")
+
     grid_levels: int = Field(ge=2, le=100)
     grid_mode: GridMode = GridMode.ARITHMETIC
     min_price_step: float = Field(default=0.0000001, gt=0)
+
     base_order_size: float = Field(gt=0)
     active_rebuy: bool = True
+    rebuy_distance_steps: int = Field(default=2, ge=1, le=10)
+
     tp_mode: TPMode = TPMode.PERCENT
     take_profit_pct: float = Field(default=0.003, gt=0, lt=1)
+
     sl_mode: SLMode = SLMode.PERCENT
     stop_loss_pct: float = Field(default=0.01, gt=0, lt=1)
     stop_loss_price: Optional[float] = Field(default=None, gt=0)
+    
     rebalance_interval: int = Field(default=300, ge=60, le=3600)
 
     @field_validator("upper_price")

@@ -49,6 +49,7 @@ grid:
 
   base_order_size: 0.01             # Grund-Ordergröße (Coin-spezifisch)
   active_rebuy: true                # Nach Fill erneut Order am selben Level platzieren
+  rebuy_distance_steps: 2           # Mindestabstand in Grid-Steps für Rebuy (1 = nächstes Level, 2 = übernächstes)
 
   tp_mode: "percent"                # "percent" oder "next_grid"
   take_profit_pct: 0.003            # Nur aktiv, wenn tp_mode = "percent"

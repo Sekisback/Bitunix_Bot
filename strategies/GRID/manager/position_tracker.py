@@ -175,27 +175,42 @@ class PositionTracker:
                 should_rebuy = False
                 
                 if current_price is not None:
-                    # Mindestabstand = 1 Grid-Step (berechnet aus levels)
+                    # Mindestabstand = X Grid-Steps (berechnet aus levels)
                     if len(levels) > 1:
                         # Finde nächstes Level für Step-Berechnung
                         sorted_prices = sorted([l.price for l in levels])
                         if len(sorted_prices) >= 2:
                             min_distance = abs(sorted_prices[1] - sorted_prices[0])
                             
-                            # BUY: Preis muss mindestens 1 Step ÜBER Level sein
-                            # SELL: Preis muss mindestens 1 Step UNTER Level sein
+                            # ✅ SAFETY: rebuy_distance_steps validieren
+                            rebuy_steps_raw = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
+                            rebuy_steps = max(1, min(10, int(rebuy_steps_raw)))
+                            
+                            # Log bei ungültigen Werten
+                            if rebuy_steps != rebuy_steps_raw:
+                                self.logger.warning(
+                                    f"⚠️ rebuy_distance_steps={rebuy_steps_raw} ungültig, "
+                                    f"verwende {rebuy_steps}"
+                                )
+                            
+                            # BUY: Preis muss mindestens X Steps ÜBER Level sein
+                            # SELL: Preis muss mindestens X Steps UNTER Level sein
                             if matched_level.side == "BUY":
-                                should_rebuy = current_price >= (matched_level.price + min_distance)
+                                required_price = matched_level.price + (min_distance * rebuy_steps)
+                                should_rebuy = current_price > required_price
+                                
                             elif matched_level.side == "SELL":
-                                should_rebuy = current_price <= (matched_level.price - min_distance)
+                                required_price = matched_level.price - (min_distance * rebuy_steps)
+                                should_rebuy = current_price < required_price
                             
                             if not should_rebuy:
                                 self.logger.debug(
-                                    f"🔄 Rebuy @ {matched_level.price:.4f} wartet auf Preis "
-                                    f"(aktuell {current_price:.4f}, benötigt ±{min_distance:.4f})"
+                                    f"🔄 Rebuy @ {matched_level.price:.4f} wartet auf "
+                                    f"{rebuy_steps} Steps Abstand "
+                                    f"(aktuell {current_price:.4f}, benötigt {required_price:.4f})"
                                 )
                 else:
-                    # Kein Preis bekannt → Standard-Verhalten (Entry-on-Touch kümmert sich)
+                    # Kein Preis bekannt → Entry-on-Touch übernimmt
                     should_rebuy = False
                     self.logger.debug(
                         f"🔄 Rebuy @ {matched_level.price:.4f} wird von Entry-on-Touch gehandelt"
