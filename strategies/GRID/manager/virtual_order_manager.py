@@ -177,16 +177,20 @@ class VirtualOrderManager:
         
         return filled_orders
     
-    def _fill_order(self, order: VirtualOrder, fill_price: float):
+    def _fill_order(self, order: VirtualOrder, fill_price: float, tp_price: Optional[float] = None, sl_price: Optional[float] = None,):
         """Füllt Order"""
         order.status = "FILLED"
         order.filled_price = fill_price
         order.filled_time = time.time()
+
+        # ✅ FIX: Formatierung außerhalb
+        tp_str = f"{tp_price:.4f}" if tp_price else "None"
+        sl_str = f"{sl_price:.4f}" if sl_price else "None"
         
         self.logger.info(
             f"💰 {self.symbol} "
-            f"✅ FILL: {order.side} {order.qty}@{fill_price:.4f} "
-            f"(Order @ {order.price:.4f})"
+            f"✅ FILL {order.side} {order.qty}@{fill_price:.4f} "
+            f"(Order @ {order.price:.4f} TP @ {tp_str}  SL @ {sl_str})"
         )
         
         # Erstelle Position

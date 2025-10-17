@@ -142,6 +142,7 @@ class GridManager:
                 risk_manager=self.risk_manager,
                 calculator=self.calculator,
                 trading_config=self.trading,
+                grid_config=self.grid_conf,
                 virtual_manager=self.virtual_manager,
                 logger=self.logger
             )
@@ -281,7 +282,6 @@ class GridManager:
                 closed_positions = self.virtual_manager.check_tp_sl(current_price)
                 if closed_positions:
                     for position in closed_positions:
-                        # Finde Level über Entry-Preis (Grid-Preis!)
                         matched_level = None
                         for lvl in self.levels:
                             if lvl.position_open:
@@ -290,14 +290,14 @@ class GridManager:
                                     break
                         
                         if matched_level:
-                            # ✅ NEU: Nutze PositionTracker mit Preis
                             pos_data = {"entryValue": matched_level.price}
+                            # ✅ FIX: Nutze position.close_price statt current_price!
                             self.position_tracker.handle_position_close(
                                 pos_data, 
                                 self.levels,
-                                current_price  # ← Preis übergeben
+                                position.close_price  # ← Jetzt 0.6800 statt 0.6825
                             )
-
+                            
             # Initial Orders (nur einmal)
             if not self.order_executor._initial_orders_placed:
                 self.logger.info(

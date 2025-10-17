@@ -173,6 +173,7 @@ class PositionTracker:
             if self.grid_conf.active_rebuy and not matched_level.position_open:
                 # Prüfe ob Preis weit genug weg ist
                 should_rebuy = False
+                required_price = None
                 
                 if current_price is not None:
                     # Mindestabstand = X Grid-Steps (berechnet aus levels)
@@ -185,8 +186,6 @@ class PositionTracker:
                             # ✅ SAFETY: rebuy_distance_steps validieren
                             rebuy_steps_raw = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
                             rebuy_steps = max(1, min(10, int(rebuy_steps_raw)))
-
-                            self.logger.info(f"🔍 DEBUG: rebuy_steps={rebuy_steps}, required_price={required_price:.4f}, current={current_price:.4f}")
                             
                             # Log bei ungültigen Werten
                             if rebuy_steps != rebuy_steps_raw:
@@ -195,17 +194,26 @@ class PositionTracker:
                                     f"verwende {rebuy_steps}"
                                 )
                             
-                            # BUY: Preis muss mindestens X Steps ÜBER Level sein
-                            # SELL: Preis muss mindestens X Steps UNTER Level sein
+                            # BUY: Rebuy wenn Preis ÜBER Entry (folgt TP-Richtung nach oben)
                             if matched_level.side == "BUY":
                                 required_price = matched_level.price + (min_distance * rebuy_steps)
                                 should_rebuy = current_price > required_price
-                                
+
+                            # SELL: Rebuy wenn Preis UNTER Entry (folgt TP-Richtung nach unten)
                             elif matched_level.side == "SELL":
                                 required_price = matched_level.price - (min_distance * rebuy_steps)
                                 should_rebuy = current_price < required_price
+
+                            # Debug-Log
+                            if required_price is not None:
+                                self.logger.info(
+                                    f"🔍 DEBUG: side={matched_level.side}, rebuy_steps={rebuy_steps}, "
+                                    f"entry={matched_level.price:.4f}, required={required_price:.4f}, "
+                                    f"current={current_price:.4f}, should_rebuy={should_rebuy}"
+                                )
                             
-                            if not should_rebuy:
+                            # ✅ FIX: Nur loggen wenn required_price existiert
+                            if not should_rebuy and required_price is not None:
                                 self.logger.debug(
                                     f"🔄 Rebuy @ {matched_level.price:.4f} wartet auf "
                                     f"{rebuy_steps} Steps Abstand "
@@ -230,7 +238,7 @@ class PositionTracker:
                         self.order_executor.place_entry_order(matched_level)
                     except Exception as rebuy_err:
                         self.logger.error(f"❌ Rebuy failed: {rebuy_err}")
-            
+
             # Net-Position updaten
             self.update_net_position()
             

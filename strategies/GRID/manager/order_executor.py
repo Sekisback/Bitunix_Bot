@@ -51,6 +51,7 @@ class OrderExecutor:
         risk_manager,
         calculator,
         trading_config,
+        grid_config,
         virtual_manager=None,
         logger: logging.Logger = None
     ):
@@ -71,6 +72,7 @@ class OrderExecutor:
         self.risk_manager = risk_manager
         self.calculator = calculator
         self.trading = trading_config
+        self.grid_conf = grid_config
         self.virtual_manager = virtual_manager
         # ✅ FIX: Nutze GridManager-Logger statt eigenen
         self.logger = logger or logging.getLogger("GridManager")
@@ -82,11 +84,7 @@ class OrderExecutor:
     # Initial Order Placement
     # =========================================================================
 
-    def place_initial_grid_orders(
-        self,
-        levels: List[GridLevel],
-        current_price: Optional[float] = None
-    ) -> int:
+    def place_initial_grid_orders(self, levels: List[GridLevel], current_price: Optional[float] = None) -> int:
         """
         Platziert alle Grid-Orders initial
         
@@ -107,7 +105,10 @@ class OrderExecutor:
         placed_count = 0
         skipped_count = 0
         
-        for lvl in levels:
+        # ✅ Bei SHORT: Von oben nach unten loggen (umgekehrte Reihenfolge)
+        levels_to_process = reversed(levels) if self.grid_direction == "short" else levels
+        
+        for lvl in levels_to_process:
             if lvl.active or lvl.filled:
                 continue
             
@@ -148,21 +149,9 @@ class OrderExecutor:
     # Entry-on-Touch Logic
     # =========================================================================
 
-    def check_new_grid_orders(
-        self,
-        levels: List[GridLevel],
-        current_price: float
-    ) -> int:
-        """
-        Platziert Orders bei Preis-Touch (Entry-on-Touch)
+    def check_new_grid_orders(self, levels: List[GridLevel], current_price: float) -> int:
+        """Platziert Orders bei Preis-Touch (Entry-on-Touch)"""
         
-        Args:
-            levels: Liste von GridLevel-Objekten
-            current_price: Aktueller Marktpreis
-        
-        Returns:
-            Anzahl neu platzierter Orders
-        """
         allow_long = self.grid_direction in ("long", "both")
         allow_short = self.grid_direction in ("short", "both")
         
@@ -171,7 +160,11 @@ class OrderExecutor:
         if len(price_list) < 2:
             return 0
         
-        min_distance = abs(price_list[1] - price_list[0]) * GRID_ORDER_MIN_DISTANCE_STEPS
+        min_distance = abs(price_list[1] - price_list[0])
+        
+        # ✅ FIX: Nutze rebuy_distance_steps für Entry-on-Touch
+        rebuy_steps = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
+        rebuy_distance = min_distance * rebuy_steps
         
         placed_count = 0
         
@@ -181,7 +174,8 @@ class OrderExecutor:
 
             if lvl.side == "BUY" and allow_long:
                 # BUY: Order platzieren wenn Preis genug ÜBER Level
-                if current_price >= (lvl.price + min_distance):
+                required_price = lvl.price + rebuy_distance
+                if current_price >= required_price:
                     try:
                         self.place_entry_order(lvl)
                         placed_count += 1
@@ -190,7 +184,8 @@ class OrderExecutor:
             
             elif lvl.side == "SELL" and allow_short:
                 # SELL: Order platzieren wenn Preis genug UNTER Level
-                if current_price <= (lvl.price - min_distance):
+                required_price = lvl.price - rebuy_distance
+                if current_price <= required_price:
                     try:
                         self.place_entry_order(lvl)
                         placed_count += 1
