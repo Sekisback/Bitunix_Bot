@@ -70,8 +70,8 @@ class GridConfig(BaseModel):
     min_price_step: float = Field(default=0.0000001, gt=0)
 
     base_order_size: float = Field(gt=0)
-    active_rebuy: bool = True
-    rebuy_distance_steps: int = Field(default=2, ge=1, le=10)
+    active_reorder: bool = True
+    reorder_distance_steps: int = Field(default=2, ge=1, le=10)
 
     tp_mode: TPMode = TPMode.PERCENT
     take_profit_pct: float = Field(default=0.003, gt=0, lt=1)

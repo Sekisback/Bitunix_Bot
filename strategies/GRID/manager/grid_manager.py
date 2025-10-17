@@ -297,7 +297,7 @@ class GridManager:
                                 self.levels,
                                 position.close_price  # ← Jetzt 0.6800 statt 0.6825
                             )
-                            
+
             # Initial Orders (nur einmal)
             if not self.order_executor._initial_orders_placed:
                 self.logger.info(
@@ -624,30 +624,30 @@ class GridManager:
             f"{'🛡️ === DRY-RUN === 🛡️' if self.trading.dry_run else '⚠️ === REAL MODE === ⚠️'}"
         )
         self.logger.info("=" * 60)
-        self.logger.info(f"Direction      : {self.grid_direction.upper()}")
-        self.logger.info(f"Margin Mode    : {self.margin_mode.upper()}")
-        self.logger.info(f"Leverage       : {self.leverage}")
-        self.logger.info(f"Mode           : {self.grid_conf.grid_mode.value}")
+        self.logger.info(f"Direction        : {self.grid_direction.upper()}")
+        self.logger.info(f"Margin Mode      : {self.margin_mode.upper()}")
+        self.logger.info(f"Leverage         : {self.leverage}")
+        self.logger.info(f"Mode             : {self.grid_conf.grid_mode.value}")
         self.logger.info(
-            f"Levels         : {len(self.levels)} "
+            f"Levels           : {len(self.levels)} "
             f"({self.grid_conf.lower_price} → {self.grid_conf.upper_price})"
         )
-        self.logger.info(f"Base Size      : {self.grid_conf.base_order_size}")
-        self.logger.info(f"Active Rebuy   : {self.grid_conf.active_rebuy}")
-        if self.grid_conf.active_rebuy:
-            rebuy_steps = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
-        self.logger.info(f"Rebuy Distance : {rebuy_steps} Grid-Steps")
+        self.logger.info(f"Base Size        : {self.grid_conf.base_order_size}")
+        self.logger.info(f"Active ReOrder   : {self.grid_conf.active_reorder}")
+        if self.grid_conf.active_reorder:
+            reorder_steps = getattr(self.grid_conf, 'reorder_distance_steps', 2)
+        self.logger.info(f"ReOrder Distance : {reorder_steps} Grid-Steps")
         
         try:
             risk_info = self.risk_manager.get_risk_summary()
-            self.logger.info(f"Take Profit    : {risk_info['tp_mode']}")
+            self.logger.info(f"Take Profit      : {risk_info['tp_mode']}")
             if risk_info.get('tp_pct'):
-                self.logger.info(f"TP %           : {risk_info['tp_pct']*100:.2f}%")
-            self.logger.info(f"Stop Loss      : {risk_info['sl_mode']}")
+                self.logger.info(f"TP %             : {risk_info['tp_pct']*100:.2f}%")
+            self.logger.info(f"Stop Loss        : {risk_info['sl_mode']}")
             if risk_info.get('sl_pct'):
-                self.logger.info(f"SL %           : {risk_info['sl_pct']*100:.2f}%")
+                self.logger.info(f"SL %             : {risk_info['sl_pct']*100:.2f}%")
             if risk_info.get('sl_price'):
-                self.logger.info(f"SL Price       : {risk_info['sl_price']}")
+                self.logger.info(f"SL Price         : {risk_info['sl_price']}")
             
             fee_info = self.risk_manager.get_fee_info()
             self.logger.info(

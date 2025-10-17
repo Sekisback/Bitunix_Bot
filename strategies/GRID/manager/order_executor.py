@@ -162,9 +162,9 @@ class OrderExecutor:
         
         min_distance = abs(price_list[1] - price_list[0])
         
-        # ✅ FIX: Nutze rebuy_distance_steps für Entry-on-Touch
-        rebuy_steps = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
-        rebuy_distance = min_distance * rebuy_steps
+        # ✅ FIX: Nutze reorder_distance_steps für Entry-on-Touch
+        reorder_steps = getattr(self.grid_conf, 'reorder_distance_steps', 2)
+        reorder_distance = min_distance * reorder_steps
         
         placed_count = 0
         
@@ -174,7 +174,7 @@ class OrderExecutor:
 
             if lvl.side == "BUY" and allow_long:
                 # BUY: Order platzieren wenn Preis genug ÜBER Level
-                required_price = lvl.price + rebuy_distance
+                required_price = lvl.price + reorder_distance
                 if current_price >= required_price:
                     try:
                         self.place_entry_order(lvl)
@@ -184,7 +184,7 @@ class OrderExecutor:
             
             elif lvl.side == "SELL" and allow_short:
                 # SELL: Order platzieren wenn Preis genug UNTER Level
-                required_price = lvl.price - rebuy_distance
+                required_price = lvl.price - reorder_distance
                 if current_price <= required_price:
                     try:
                         self.place_entry_order(lvl)

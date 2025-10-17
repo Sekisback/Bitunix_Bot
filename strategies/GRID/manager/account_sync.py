@@ -151,7 +151,7 @@ class AccountSync:
                 self.logger.warning(f"⚠️ Kein Grid-Level für gefüllte Order @ {price}")
                 return
             
-            # ✅ NEU: GridManager übernimmt alles (Fill-Markierung + Hedge + Rebuy)
+            # ✅ NEU: GridManager übernimmt alles (Fill-Markierung + Hedge + ReOrder)
             self.grid_manager.handle_order_fill(matched_level)
             
         except Exception as e:

@@ -48,8 +48,8 @@ grid:
   min_price_step: 0.0000001         # Minimales Tick-Intervall für Rundungen in grid_mode "geometric"
 
   base_order_size: 0.01             # Grund-Ordergröße (Coin-spezifisch)
-  active_rebuy: true                # Nach Fill erneut Order am selben Level platzieren
-  rebuy_distance_steps: 2           # Mindestabstand in Grid-Steps für Rebuy (1 = nächstes Level, 2 = übernächstes)
+  active_reorder: true              # Nach Fill erneut Order am selben Level platzieren
+  reorder_distance_steps: 2         # Mindestabstand in Grid-Steps für ReOrder (1 = nächstes Level, 2 = übernächstes)
 
   tp_mode: "percent"                # "percent" oder "next_grid"
   take_profit_pct: 0.003            # Nur aktiv, wenn tp_mode = "percent"

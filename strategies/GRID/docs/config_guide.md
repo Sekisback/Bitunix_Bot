@@ -100,7 +100,7 @@ Kleinster Preis-Schritt (Tick-Größe).
 Grund-Ordergröße in USDT oder Coin-Einheiten.  
 **Beispiel:** `50` für 50 USDT pro Order.
 
-### `grid.active_rebuy`
+### `grid.active_reorder`
 Nach Fill automatisch wieder Order am selben Level platzieren.  
 **Empfehlung:** `true` für klassisches Grid-Trading.
 

@@ -7,7 +7,7 @@ Zuständig für:
 - Position-Close Handling (TP/SL)
 - Order-Cancel Handling
 - Net-Position Tracking
-- Rebuy-Logik mit Mindestabstand
+- ReOrder-Logik mit Mindestabstand
 """
 
 import logging
@@ -138,7 +138,7 @@ class PositionTracker:
         Args:
             position_data: Position-Daten vom Exchange
             levels: Liste aller Grid-Levels
-            current_price: Aktueller Marktpreis (für Rebuy-Check)
+            current_price: Aktueller Marktpreis (für ReOrder-Check)
         """
         try:
             # Entry-Preis aus Position-Daten
@@ -165,14 +165,14 @@ class PositionTracker:
             self.total_closes += 1
             
             self.logger.info(
-                f"✅ Grid #{matched_level.index} @ {matched_level.price:.4f} "
-                f"→ Position geschlossen, Level FREI"
+                f"💰 {self.symbol} ✅ Grid #{matched_level.index} @ {matched_level.price:.4f} "
+                f"→ Position geschlossen @ {current_price}"
             )
             
-            # ✅ Rebuy wenn aktiviert UND Preis weit genug weg
-            if self.grid_conf.active_rebuy and not matched_level.position_open:
+            # ✅ ReOrder wenn aktiviert UND Preis weit genug weg
+            if self.grid_conf.active_reorder and not matched_level.position_open:
                 # Prüfe ob Preis weit genug weg ist
-                should_rebuy = False
+                should_reorder = False
                 required_price = None
                 
                 if current_price is not None:
@@ -183,52 +183,51 @@ class PositionTracker:
                         if len(sorted_prices) >= 2:
                             min_distance = abs(sorted_prices[1] - sorted_prices[0])
                             
-                            # ✅ SAFETY: rebuy_distance_steps validieren
-                            rebuy_steps_raw = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
-                            rebuy_steps = max(1, min(10, int(rebuy_steps_raw)))
+                            # ✅ SAFETY: reorder_distance_steps validieren
+                            reorder_steps_raw = getattr(self.grid_conf, 'reorder_distance_steps', 2)
+                            reorder_steps = max(1, min(10, int(reorder_steps_raw)))
                             
                             # Log bei ungültigen Werten
-                            if rebuy_steps != rebuy_steps_raw:
+                            if reorder_steps != reorder_steps_raw:
                                 self.logger.warning(
-                                    f"⚠️ rebuy_distance_steps={rebuy_steps_raw} ungültig, "
-                                    f"verwende {rebuy_steps}"
+                                    f"⚠️ reorder_distance_steps={reorder_steps_raw} ungültig, "
+                                    f"verwende {reorder_steps}"
                                 )
                             
-                            # BUY: Rebuy wenn Preis ÜBER Entry (folgt TP-Richtung nach oben)
+                            # BUY: ReOrder wenn Preis ÜBER Entry (folgt TP-Richtung nach oben)
                             if matched_level.side == "BUY":
-                                required_price = matched_level.price + (min_distance * rebuy_steps)
-                                should_rebuy = current_price > required_price
+                                required_price = matched_level.price + (min_distance * reorder_steps)
+                                should_reorder = current_price > required_price
 
-                            # SELL: Rebuy wenn Preis UNTER Entry (folgt TP-Richtung nach unten)
+                            # SELL: ReOrder wenn Preis UNTER Entry (folgt TP-Richtung nach unten)
                             elif matched_level.side == "SELL":
-                                required_price = matched_level.price - (min_distance * rebuy_steps)
-                                should_rebuy = current_price < required_price
+                                required_price = matched_level.price - (min_distance * reorder_steps)
+                                should_reorder = current_price < required_price
 
-                            # Debug-Log
+
                             if required_price is not None:
                                 self.logger.info(
-                                    f"🔍 DEBUG: side={matched_level.side}, rebuy_steps={rebuy_steps}, "
-                                    f"entry={matched_level.price:.4f}, required={required_price:.4f}, "
-                                    f"current={current_price:.4f}, should_rebuy={should_rebuy}"
+                                    f"💰 {self.symbol} ✅ Grid #{matched_level.index} @ {matched_level.price:.4f} " 
+                                    f"reopen @ {required_price:.4f}"
                                 )
                             
                             # ✅ FIX: Nur loggen wenn required_price existiert
-                            if not should_rebuy and required_price is not None:
+                            if not should_reorder and required_price is not None:
                                 self.logger.debug(
-                                    f"🔄 Rebuy @ {matched_level.price:.4f} wartet auf "
-                                    f"{rebuy_steps} Steps Abstand "
+                                    f"🔄 ReOrder @ {matched_level.price:.4f} wartet auf "
+                                    f"{reorder_steps} Steps Abstand "
                                     f"(aktuell {current_price:.4f}, benötigt {required_price:.4f})"
                                 )
                 else:
                     # Kein Preis bekannt → Entry-on-Touch übernimmt
-                    should_rebuy = False
+                    should_reorder = False
                     self.logger.debug(
-                        f"🔄 Rebuy @ {matched_level.price:.4f} wird von Entry-on-Touch gehandelt"
+                        f"🔄 ReOrder @ {matched_level.price:.4f} wird von Entry-on-Touch gehandelt"
                     )
                 
                 # Nur platzieren wenn Preis weit genug weg
-                if should_rebuy:
-                    self.logger.debug(f"🔄 Rebuy @ {matched_level.price:.4f}")
+                if should_reorder:
+                    self.logger.debug(f"🔄 ReOrder @ {matched_level.price:.4f}")
                     
                     # Kurze Pause damit Position vollständig geschlossen ist
                     import time
@@ -236,8 +235,8 @@ class PositionTracker:
                     
                     try:
                         self.order_executor.place_entry_order(matched_level)
-                    except Exception as rebuy_err:
-                        self.logger.error(f"❌ Rebuy failed: {rebuy_err}")
+                    except Exception as reorder_err:
+                        self.logger.error(f"❌ ReOrder failed: {reorder_err}")
 
             # Net-Position updaten
             self.update_net_position()
