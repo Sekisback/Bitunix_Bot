@@ -107,6 +107,7 @@ class OrderExecutor:
         
         # ✅ Bei SHORT: Von oben nach unten loggen (umgekehrte Reihenfolge)
         levels_to_process = reversed(levels) if self.grid_direction == "short" else levels
+        #levels_to_process = reversed(levels)
         
         for lvl in levels_to_process:
             if lvl.active or lvl.filled:

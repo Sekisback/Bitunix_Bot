@@ -454,7 +454,9 @@ class GridManager:
             return
 
         scope = self.hedge_manager.price_protect_scope or 0.05
+        # short
         min_price = current_price * (1 - scope)
+        # long
         max_price = current_price * (1 + scope)
         
         is_out_of_scope = False
@@ -473,15 +475,12 @@ class GridManager:
                 # ✅ FIX: Nur loggen wenn required_price existiert
                 if required_price is not None:
                     self.logger.warning(
-                        f"[HEDGE] ⏳ Hedge @ {hedge_price:.4f} außerhalb Scope "
-                        f"({min_price:.4f} - {max_price:.4f})"
-                        f"  → Wartet auf Preis ~{required_price:.4f} ({trigger})"
+                        f"💰 {self.symbol} ⏳ Hedge @ {hedge_price:.4f} außerhalb der Range @ {required_price:.4f} ({trigger})"
                     )
                 else:
                     # Fallback ohne required_price
                     self.logger.warning(
-                        f"[HEDGE] ⏳ Hedge @ {hedge_price:.4f} außerhalb Scope "
-                        f"({min_price:.4f} - {max_price:.4f}) ({trigger})"
+                        f"💰 {self.symbol} ⏳ Hedge @ {hedge_price:.4f} außerhalb der Range @ {required_price:.4f} ({trigger})"
                     )
                 self._last_hedge_warning = (hedge_price, trigger)
                 self.hedge_manager.hedge_pending = True

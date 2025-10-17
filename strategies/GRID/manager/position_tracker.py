@@ -164,10 +164,10 @@ class PositionTracker:
             
             self.total_closes += 1
             
-            self.logger.info(
-                f"💰 {self.symbol} ✅ Grid #{matched_level.index} @ {matched_level.price:.4f} "
-                f"→ Position geschlossen @ {current_price}"
-            )
+            # self.logger.info(
+            #     f"💰 {self.symbol} ✅ Grid #{matched_level.index} @ {matched_level.price:.4f} "
+            #     f"→ Position geschlossen @ {current_price}"
+            # )
             
             # ✅ ReOrder wenn aktiviert UND Preis weit genug weg
             if self.grid_conf.active_reorder and not matched_level.position_open:
@@ -208,7 +208,7 @@ class PositionTracker:
                             if required_price is not None:
                                 self.logger.info(
                                     f"💰 {self.symbol} ✅ Grid #{matched_level.index} @ {matched_level.price:.4f} " 
-                                    f"reopen @ {required_price:.4f}"
+                                    f"Position geschlossen (TP/SL). Grid wir freigegeben wenn Preis {required_price:.4f} erreicht"
                                 )
                             
                             # ✅ FIX: Nur loggen wenn required_price existiert
