@@ -51,6 +51,7 @@ class GridConfigGUI:
         
         # Chart-Canvas
         self.chart_canvas = None
+        self._chart_initialized = False
         
         # Timeframe-Mapping (GUI -> API)
         self.timeframe_map = {
@@ -72,6 +73,9 @@ class GridConfigGUI:
         
         # Layout erstellen
         self._create_layout()
+
+        # ⭐ Chart-Canvas HIER erstellen (vor _load_coins)
+        self._setup_chart()
         
         # Coins laden
         self._load_coins()
@@ -196,6 +200,17 @@ class GridConfigGUI:
             anchor="w"
         )
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+
+    def _setup_chart(self):
+        """Erstellt Chart-Canvas einmalig"""
+        import matplotlib.pyplot as plt
+        
+        self.fig, self.ax = plt.subplots(figsize=(9, 4.5), dpi=160, facecolor="#2e2e2e")
+        self.ax.set_facecolor("#2e2e2e")
+        
+        self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
+        self.chart_canvas.get_tk_widget().configure(bg="#2e2e2e")
+        self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
     
     def _load_coins(self):
         """Lädt Coin-Liste von Bitunix API"""
@@ -345,24 +360,6 @@ class GridConfigGUI:
     def _update_chart(self, df, coin, tf):
         """Aktualisiert bestehenden Chart im TradingView-Style ohne Flackern"""
         import matplotlib.pyplot as plt
-
-        # Chart beim ersten Aufruf initialisieren
-        if not hasattr(self, "fig"):
-            self.fig, self.ax = plt.subplots(figsize=(9, 4.5), dpi=100, facecolor="#2e2e2e")
-            self.ax.set_facecolor("#2e2e2e")
-
-            # Stil
-            for spine in self.ax.spines.values():
-                spine.set_visible(False)
-            self.ax.grid(True, axis="y", color="#333333", linestyle="-", linewidth=0.4)
-            self.ax.grid(False, axis="x")
-            self.ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
-            self.ax.title.set_color("#ffffff")
-
-            # Canvas einmalig erstellen
-            self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
-            self.chart_canvas.draw()
-            self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
         # === Update ohne Neuzeichnen des Canvas ===
         self.ax.clear()
