@@ -185,6 +185,8 @@ class PositionTracker:
                             # ✅ SAFETY: rebuy_distance_steps validieren
                             rebuy_steps_raw = getattr(self.grid_conf, 'rebuy_distance_steps', 2)
                             rebuy_steps = max(1, min(10, int(rebuy_steps_raw)))
+
+                            self.logger.info(f"🔍 DEBUG: rebuy_steps={rebuy_steps}, required_price={required_price:.4f}, current={current_price:.4f}")
                             
                             # Log bei ungültigen Werten
                             if rebuy_steps != rebuy_steps_raw:
