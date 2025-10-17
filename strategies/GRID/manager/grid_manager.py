@@ -485,24 +485,67 @@ class GridManager:
     # ========================================
 
     def print_grid_status(self):
-        """Loggt Grid-Status"""
+        """
+        Loggt Grid-Status mit Hedge-Anzeige
+        
+        Hedge Display zeigt IMMER:
+        - Berechneten Preis (Trigger-Level)
+        - Aktuelle Qty (basierend auf Net-Position)
+        - SL-Preis (ein Grid über/unter Bound)
+        - Status: ⏸️ = bereit aber inaktiv, 🛡️ = aktiv
+        """
         total = len(self.levels)
         active = sum(1 for l in self.levels if l.active)
         filled = sum(1 for l in self.levels if l.filled)
         
-        hedge_active = getattr(self.hedge_manager, "active", False)
-        hedge_status = "🛡️" if hedge_active else "⏸️"
+        # Hedge-Status aufbauen (wenn enabled)
+        if getattr(self.hedge_manager.config, "enabled", False):
+            # Grid-Bounds holen
+            price_list = self.calculator.calculate_price_list()
+            lower_bound = price_list[0]
+            upper_bound = price_list[-1]
+            step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+            
+            # Net Position für Qty-Berechnung (LIVE)
+            net_pos = self.position_tracker.get_net_position()
+            
+            # Hedge-Parameter berechnen (IMMER aktuell)
+            if self.grid_direction == "long":
+                hedge_price = lower_bound - step
+                sl_price = hedge_price + (2 * step)  # Ein Grid ÜBER lower_bound
+                # Qty: Net-Position oder base_size als Fallback
+                hedge_qty = abs(net_pos) if abs(net_pos) > 0.001 else self.grid_conf.base_order_size
+                
+            elif self.grid_direction == "short":
+                hedge_price = upper_bound + step
+                sl_price = hedge_price - (2 * step)  # Ein Grid UNTER upper_bound
+                hedge_qty = abs(net_pos) if abs(net_pos) > 0.001 else self.grid_conf.base_order_size
+            else:
+                hedge_price = None
+                sl_price = None
+                hedge_qty = 0
+            
+            # Status-Symbol
+            hedge_active = getattr(self.hedge_manager, "active", False)
+            symbol = "🛡️" if hedge_active else "⏸️"
+            
+            # Display-String mit ALLEN Infos
+            if hedge_price and sl_price and hedge_qty > 0:
+                hedge_status = (
+                    f"{symbol} {hedge_qty:.0f}@{hedge_price:.4f} "
+                    f"SL:{sl_price:.4f}"
+                )
+            else:
+                hedge_status = "❌"
+        else:
+            # Hedge komplett disabled
+            hedge_status = "❌"
         
-        if hedge_active:
-            hedge_price = getattr(self.hedge_manager, "current_hedge_price", None)
-            hedge_qty = getattr(self.hedge_manager, "current_hedge_size", 0)
-            if hedge_price:
-                hedge_status = f"🛡️ @{hedge_price:.4f} ({hedge_qty:.0f})"
+        # Aktuellen Preis holen
+        current_price = self._last_known_price or 0.0
         
-        # ✅ NEU: Nutze PositionTracker
-        net_display = self.position_tracker.get_net_position()
-        
-        current_state = (active, filled, net_display, hedge_status)
+        # State-Check für Throttling (nur loggen wenn was geändert hat)
+        current_state = (active, filled, hedge_status)
         last_state = getattr(self, "_last_status_log", None)
         
         if current_state == last_state:
@@ -510,17 +553,20 @@ class GridManager:
         
         self._last_status_log = current_state
         
+        # Output
         if self.trading.dry_run and self.virtual_manager:
             stats = self.virtual_manager.get_stats()
             self.logger.info(
-                f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | "
-                f"Net: {net_display:.2f} | Hedge: {hedge_status} | "
+                f"💰 {self.symbol} @ {current_price:.4f} | "
+                f"Active: {active}/{total} | Filled: {filled} | "
+                f"Hedge: {hedge_status} | "
                 f"PnL: {stats['total_pnl']:+.2f} USDT ({stats['win_rate']:.0f}% WR)"
             )
         else:
             self.logger.info(
-                f"📊 {self.symbol} | Active: {active}/{total} | Filled: {filled} | "
-                f"Net: {net_display:.2f} | Hedge: {hedge_status}"
+                f"💰 {self.symbol} @ {current_price:.4f} | "
+                f"Active: {active}/{total} | Filled: {filled} | "
+                f"Hedge: {hedge_status}"
             )
 
     def log_summary(self) -> None:

@@ -34,6 +34,7 @@ class HedgeManager:
         
         # Order Tracking
         self.hedge_order_id = None
+        self.hedge_client_id = None 
         self.current_hedge_price = None
         self.current_hedge_size = 0
         self.current_sl_price = None
@@ -130,28 +131,24 @@ class HedgeManager:
         return abs(net_position) * fraction * multiplier
 
     # ----------------------------------------------------------------
-    def place_order(self, side: str, reference_price: float, size: float, 
-                   sl_price: Optional[float] = None):
+    def place_order(self, side: str, reference_price: float, size: float, sl_price: Optional[float] = None):
         """
         Platziert MARKET Hedge-Order mit Stop-Loss
-        
-        Args:
-            side: "BUY" oder "SELL"
-            reference_price: Nur für SL-Berechnung (falls nicht übergeben)
-            size: Ordergröße
-            sl_price: Stop-Loss-Preis (optional)
         """
-        # Größe prüfen
         if size <= 0:
             self.logger.warning("[HEDGE] ❌ Ungültige Hedge-Größe (0)")
             return
 
+        # Client ID generieren
+        client_id = f"HEDGE_{int(time.time())}"
+        
         # Dry-Run
         if self.dry_run:
             sl_str = f" | SL={sl_price:.4f}" if sl_price else ""
-            self.logger.debug(f"[HEDGE] (Dry) {side} Market{sl_str}")
+            self.logger.info(f"[HEDGE] (Dry) Market {side} Qty={size:.1f}{sl_str}")
             
-            self.current_hedge_price = reference_price  # für Display
+            self.hedge_client_id = client_id  # Speichern
+            self.current_hedge_price = reference_price
             self.current_hedge_size = size
             self.current_sl_price = sl_price
             self.active = True
@@ -162,13 +159,13 @@ class HedgeManager:
             order_params = {
                 "symbol": self.symbol,
                 "side": side,
-                "order_type": "MARKET",  # ← Market Order
+                "order_type": "MARKET",
                 "qty": size,
                 "trade_side": "OPEN",
-                "client_id": f"HEDGE_{int(time.time())}"
+                "client_id": client_id  # ← HEDGE_ Prefix
             }
             
-            # Stop-Loss anhängen (optional)
+            # Stop-Loss anhängen
             if sl_price:
                 order_params["sl_price"] = sl_price
                 order_params["sl_stop_type"] = "MARK_PRICE"
@@ -178,13 +175,16 @@ class HedgeManager:
             
             # Status speichern
             self.hedge_order_id = order_id
-            self.current_hedge_price = reference_price  # Nur für Display
+            self.hedge_client_id = client_id  # ← Speichern für Tracking
+            self.current_hedge_price = reference_price
             self.current_hedge_size = size
             self.current_sl_price = sl_price
             self.active = True
             
             sl_info = f" | SL={sl_price:.4f}" if sl_price else ""
-            self.logger.info(f"[HEDGE] ✅ Market Order → ID={order_id}{sl_info}")
+            self.logger.info(
+                f"[HEDGE] ✅ Market Order → ID={order_id} ClientID={client_id}{sl_info}"
+            )
         
         except OrderPlacementError as e:
             self.logger.error(f"[HEDGE] ❌ Order-Placement-Fehler: {e}")
@@ -196,17 +196,23 @@ class HedgeManager:
         
         except Exception as e:
             self.logger.exception(f"[HEDGE] ❌ Unerwarteter Fehler: {e}")
-
+            
     # ----------------------------------------------------------------
     def close(self):
         """
         Schließt aktive Hedge-Position
+        Wird nur aufgerufen wenn Preis wieder in Range
         """
         self.logger.info("[HEDGE] ✅ Preis wieder in Range – Hedge wird geschlossen.")
         
         if self.dry_run:
             self.logger.debug("[HEDGE] (Dry-Run aktiv – keine echte Schließung)")
             self.active = False
+            self.hedge_order_id = None
+            self.hedge_client_id = None
+            self.current_hedge_price = None
+            self.current_hedge_size = 0
+            self.current_sl_price = None
             return
 
         # Position schließen
@@ -219,6 +225,7 @@ class HedgeManager:
         # Status zurücksetzen
         self.active = False
         self.hedge_order_id = None
+        self.hedge_client_id = None
         self.current_hedge_price = None
         self.current_hedge_size = 0
         self.current_sl_price = None

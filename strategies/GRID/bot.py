@@ -89,51 +89,53 @@ class GridBot:
                     last_logged_minute = getattr(self, "_last_logged_minute", None)
                     
                     if current_minute != last_logged_minute:
-                        # 📊 Grid-Status sammeln
+                        # Grid-Status sammeln
                         total = len(self.grid.levels)
                         active = sum(1 for l in self.grid.levels if l.active)
                         filled = sum(1 for l in self.grid.levels if l.filled)
                         
-                        # ✅ Risiko-basierte Net-Berechnung
-                        if self.grid.grid_direction == "long":
-                            active_below = sum(
-                                1 for l in self.grid.levels 
-                                if l.active and l.price < last_price
-                            )
-                            filled_pos = sum(
-                                1 for l in self.grid.levels 
-                                if l.position_open or l.filled
-                            )
-                            net_risk = active_below + filled_pos
-                        else:  # short
-                            active_above = sum(
-                                1 for l in self.grid.levels 
-                                if l.active and l.price > last_price
-                            )
-                            filled_pos = sum(
-                                1 for l in self.grid.levels 
-                                if l.position_open or l.filled
-                            )
-                            net_risk = active_above + filled_pos
-                        
-                        base_size = self.grid.risk_manager.calculate_effective_size()
-                        net_pos = net_risk * base_size
-                        
-                        # 🛡️ Hedge-Status mit Preis + SL
-                        hedge_active = getattr(self.grid.hedge_manager, "active", False)
-                        if hedge_active:
-                            hedge_price = getattr(self.grid.hedge_manager, "current_hedge_price", None)
-                            hedge_qty = getattr(self.grid.hedge_manager, "current_hedge_size", 0)
-                            hedge_sl = getattr(self.grid.hedge_manager, "current_sl_price", None)
-                            if hedge_price:
-                                sl_str = f"SL: {hedge_sl:.4f}" if hedge_sl else ""
-                                hedge_str = f"🛡️  @ {hedge_price:.4f} {sl_str} ({hedge_qty:.0f})"
+                        # ===== HEDGE STATUS BERECHNEN =====
+                        if getattr(self.grid.hedge_manager.config, "enabled", False):
+                            # Grid-Bounds holen
+                            price_list = self.grid.calculator.calculate_price_list()
+                            lower_bound = price_list[0]
+                            upper_bound = price_list[-1]
+                            step = abs(price_list[1] - price_list[0]) if len(price_list) > 1 else 0
+                            
+                            # Net Position (LIVE)
+                            net_pos = self.grid.position_tracker.get_net_position()
+                            
+                            # Hedge-Parameter berechnen
+                            if self.grid.grid_direction == "long":
+                                hedge_price = lower_bound - step
+                                sl_price = hedge_price + (2 * step)
+                                hedge_qty = abs(net_pos) if abs(net_pos) > 0.001 else self.grid.grid_conf.base_order_size
+                                
+                            elif self.grid.grid_direction == "short":
+                                hedge_price = upper_bound + step
+                                sl_price = hedge_price - (2 * step)
+                                hedge_qty = abs(net_pos) if abs(net_pos) > 0.001 else self.grid.grid_conf.base_order_size
                             else:
-                                hedge_str = "🛡️ "
+                                hedge_price = None
+                                sl_price = None
+                                hedge_qty = 0
+                            
+                            # Status-Symbol
+                            hedge_active = getattr(self.grid.hedge_manager, "active", False)
+                            symbol = "🛡️" if hedge_active else "⏸️ "
+                            
+                            # Display-String
+                            if hedge_price and sl_price and hedge_qty > 0:
+                                hedge_status = (
+                                    f"{symbol} {hedge_qty:.0f} @ {hedge_price:.4f} "
+                                    f"SL:{sl_price:.4f}"
+                                )
+                            else:
+                                hedge_status = "❌"
                         else:
-                            hedge_str = "⏸️ "
-                                                
-                        # 💰 PnL-Daten vom VirtualOrderManager
+                            hedge_status = "❌"
+                        
+                        # Stats für Dry-Run
                         if self.grid.trading.dry_run and self.grid.virtual_manager:
                             stats = self.grid.virtual_manager.get_stats()
                             pnl = stats['total_pnl']
@@ -142,18 +144,25 @@ class GridBot:
                             pnl = 0.0
                             wr = 0.0
                         
-                        # 🎯 ✅ VOLLSTÄNDIGE Log-Zeile (mit SL)
-                        logger.info(
-                            f"💰 {self.symbol} @ {last_price:.4f} | "
-                            f"Active: {active}/{total} | Filled: {filled} | "
-                            f"Hedge: {hedge_str} | "
-                            f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
-                        )
+                        # ===== LOGGING =====
+                        if self.grid.trading.dry_run:
+                            logger.info(
+                                f"💰 {self.symbol} @ {last_price:.4f} | "
+                                f"Active: {active}/{total} | Filled: {filled} | "
+                                f"Hedge: {hedge_status} | "
+                                f"PnL: {pnl:+.2f} USDT ({wr:.0f}% WR)"
+                            )
+                        else:
+                            logger.info(
+                                f"💰 {self.symbol} @ {last_price:.4f} | "
+                                f"Active: {active}/{total} | Filled: {filled} | "
+                                f"Hedge: {hedge_status}"
+                            )
                         
                         self._last_logged_minute = current_minute
-                    
-                    # Grid-Update
-                    self.grid.update(last_price)
+                        
+                        # Grid-Update
+                        self.grid.update(last_price)
                     
         except Exception as e:
             logger.error(f"Public WS error: {e}")

@@ -81,7 +81,7 @@ class AccountSync:
                 self.logger.info(f"🟢 Order: {side} {qty}@{price}")
             
             elif status in ("filled", "partially_filled"):
-                self.logger.info(f"✅ Filled: {side} {qty}@{price}")
+                self.logger.info(f"✅ Filled: {side} {qty} @ {price}")
                 
                 # ✅ NEU: Rufe GridManager-Handler auf
                 if self.grid_manager:
@@ -161,14 +161,34 @@ class AccountSync:
     def _handle_position_close(self, position_data: Dict[str, Any]):
         """
         Behandelt geschlossene Positionen (TP/SL getriggert).
-        Ruft GridManager auf um Level freizugeben.
+        Erkennt Hedge über Client ID.
         """
         try:
             if not self.grid_manager:
                 self.logger.warning("⚠️ Position-Close: GridManager=None")
                 return
             
-            # GridManager übernimmt die Logik
+            # Client ID prüfen (wenn vorhanden)
+            client_id = position_data.get("clientId", "")
+            event = position_data.get("event", "")
+            
+            # Hedge-Position erkennen über Client ID
+            if client_id.startswith("HEDGE_"):
+                self.logger.info(
+                    f"[HEDGE] 🛑 Hedge geschlossen (Event: {event}, ClientID: {client_id})"
+                )
+                
+                # Hedge deaktivieren
+                self.grid_manager.hedge_manager.active = False
+                
+                # Beim nächsten update() prüft check_trigger() automatisch
+                # ob Preis noch außerhalb ist → neue Market Order
+                self.logger.info(
+                    "[HEDGE] 💤 Hedge deaktiviert → Nächster Trigger prüft ob Wiedereröffnung nötig"
+                )
+                return
+            
+            # Normale Grid-Position (Client ID: GRID_SYMBOL_INDEX)
             self.grid_manager.handle_position_close(position_data)
             
         except Exception as e:
