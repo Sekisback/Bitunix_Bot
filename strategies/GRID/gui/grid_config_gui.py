@@ -42,6 +42,8 @@ class GridConfigGUI:
         # Pfade
         self.root_dir = Path(__file__).parent.parent   # eine Ebene über /gui/
         self.config_dir = self.root_dir / "configs"
+        self.current_config_path = None
+
 
         # Flags
         self.use_local_configs = False  # Start im API-Modus
@@ -76,7 +78,7 @@ class GridConfigGUI:
 
         # Chart-Canvas HIER erstellen (vor _load_coins)
         self._setup_chart()
-        
+
         # Coins laden
         self._load_coins()
     
@@ -420,17 +422,6 @@ class GridConfigGUI:
             self._update_status(f"❌ Fehler: {e}")
             print(f"Error loading coins: {e}")
     
-    def _toggle_source_mode(self):
-        """Zwischen API-Mode und lokalem Config-Mode umschalten"""
-        self.use_local_configs = not self.use_local_configs
-
-        if self.use_local_configs:
-            self.mode_button.config(text="📂")
-            self._load_local_configs()
-        else:
-            self.mode_button.config(text="🌐")
-            self._load_coins()
-
 
     def _load_local_configs(self):
         """Lädt YAML-Dateien aus dem Config-Ordner"""
@@ -465,6 +456,9 @@ class GridConfigGUI:
                 self.selected_coin.set(coin)
 
                 self._update_status(f"📂 {name} geladen ({coin})")
+
+                # Config-Werte aus YAML auf GUI anwenden
+                self._apply_config_values(cfg)
 
                 # Chart für Symbol aus YAML laden
                 self._load_chart()
@@ -637,6 +631,38 @@ class GridConfigGUI:
         import sys
         sys.exit(0)
 
+
+    def _apply_config_values(self, cfg):
+        """Überträgt Werte aus geladener Coin-Config in die GUI-Variablen"""
+        try:
+            trading = cfg.get("trading", {})
+            grid = cfg.get("grid", {})
+
+            # === Grid Direction ===
+            if "grid_direction" in trading and hasattr(self, "grid_dir_var"):
+                val = trading["grid_direction"]
+                if hasattr(self, "grid_dir_map"):
+                    for display, real in self.grid_dir_map.items():
+                        if real == val:
+                            self.grid_dir_var.set(display)
+                            break
+
+            # === Grid Mode ===
+            if "grid_mode" in grid and hasattr(self, "grid_mode_var"):
+                val = grid["grid_mode"]
+                if hasattr(self, "grid_mode_map"):
+                    for display, real in self.grid_mode_map.items():
+                        if real == val:
+                            self.grid_mode_var.set(display)
+                            break
+
+            self._update_status("✅ Config-Werte übernommen")
+
+        except Exception as e:
+            print(f"⚠️ Fehler beim Anwenden der Config-Werte: {e}")
+            self._update_status("⚠️ Fehler beim Anwenden der Config-Werte")
+
+
     def _save_current_config(self):
             """Speichert aktuelle GUI-Werte in die aktive oder neue YAML-Datei"""
             try:
@@ -720,21 +746,6 @@ class GridConfigGUI:
             self.mode_button.config(text="🌐")
             self._load_coins()
             self._update_status("🌐 API-Modus aktiviert")
-
-
-    def _load_local_configs(self):
-        """Lädt YAML-Dateien aus dem Config-Ordner"""
-        try:
-            yaml_files = sorted([f.name for f in self.config_dir.glob("*.yaml")])
-            self.coin_dropdown["values"] = yaml_files
-            if yaml_files:
-                self.coin_dropdown.set(yaml_files[0])
-                self._on_coin_select(None)
-            else:
-                self._update_status("❌ Keine YAML-Dateien gefunden")
-        except Exception as e:
-            self._update_status(f"❌ Fehler beim Laden: {e}")
-            print(f"Fehler beim Laden lokaler Configs: {e}")
 
 
 if __name__ == "__main__":
