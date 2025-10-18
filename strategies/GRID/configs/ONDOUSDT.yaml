@@ -1,59 +1,8 @@
-# =============================================================================
-# BASE CONFIG – Standardparameter für den Bitunix GRID Bot
-# =============================================================================
-# Diese Datei dient als Grundlage für alle Coin-spezifischen YAMLs.
-# Coin-Configs erben automatisch alle Werte aus dieser Base-Datei
-# und überschreiben nur die relevanten Felder (z.B. Preise, Ordergrößen).
-# =============================================================================
-
-symbol: "ONDOUSDT"                  # Platzhalter, wird in Coin-Config überschrieben
-
-# -----------------------------------------------------------------------------
-# ⚙️ TRADING-GRUNDEINSTELLUNGEN
-# -----------------------------------------------------------------------------
+symbol: ONDOUSDT
 trading:
-  dry_run: true                     # true = Simulation ohne echte Orders
-  grid_direction: "short"           # "long", "short" oder "both" – Handelsrichtung
-  client_id_prefix: "GRID"          # Präfix für Client-Order-IDs (z.B. "GRID_BTC")
-
-# -----------------------------------------------------------------------------
-# 📊 GRID-PARAMETER
-# -----------------------------------------------------------------------------
+  grid_direction: long
 grid:
-  upper_price: 0.78                  # Obere Preisgrenze des Grids (Coin-spezifisch)
-  lower_price: 0.68                 # Untere Preisgrenze des Grids (Coin-spezifisch)
-  grid_levels: 80                    # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
-
-  base_order_size: 200               # Grund-Ordergröße (Coin-spezifisch)
-
-  tp_mode: "next_grid"              # "percent" oder "next_grid"
-  take_profit_pct: 0.03             # Nur aktiv, wenn tp_mode = "percent"
-
-  sl_mode: "none"                   # "percent", "fixed" oder "none"
-  stop_loss_pct: 0.01               # Nur aktiv, wenn sl_mode = "percent"
-  stop_loss_price: 0.80             # Nur bei sl_mode = "fixed" aktiv
-
-# -----------------------------------------------------------------------------
-# 💸 GEBÜHREN
-# -----------------------------------------------------------------------------
-risk:
-  include_fees: false               # true = Ordergröße berücksichtigt Gebühren
-
-# -----------------------------------------------------------------------------
-# 🛡️ HEDGE MANAGEMENT
-# -----------------------------------------------------------------------------
-hedge:
-  enabled: true                     # Deaktiviert per Default
-  preemptive_hedge: true            # Präventiver Hedge bei offenen Grid-Orders
-  mode: direct                      # Optionen: direct | dynamic | reversal
-  trigger_offset: 1                 # Multiplikator auf grid_step, z. B. 1.0 = 1x Abstand unter Range
-  partial_levels: [0.5, 0.75, 1.0]  # Nur bei dynamic relevant
-  close_on_reentry: true            # Hedge schließen, wenn Preis wieder in Range
-  size_mode: net_position           # Alternativ fixed (z. B. 50 % Hedge)
-  fixed_size_ratio: 0.5             # Nur relevant bei size_mode=fixed
-
-# -----------------------------------------------------------------------------
-# 💰 MARGIN- UND HEBELKONFIGURATION
-# -----------------------------------------------------------------------------
-margin:
-  leverage: 1                       # Hebel für diese Strategie
+  grid_mode: linear
+  upper_price: 0.78
+  lower_price: 0.68
+  grid_levels: 20
