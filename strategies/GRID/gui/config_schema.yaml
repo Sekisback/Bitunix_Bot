@@ -75,15 +75,18 @@ trading:
   dry_run:
     type: bool
     default: true
+    label: ""
     description: "Simulation ohne echte Orders"
   grid_direction:
     type: select
-    options: ["long", "short", "both"]
-    default: "both"
-    description: "Handelsrichtung"
+    options: ["long", "short"]
+    default: "long"
+    label: "Handelsrichtung"
+    description: "Legt die Handelsrichtung für die Grid-Strategie fest (Long, Short)"
   client_id_prefix:
     type: str
     default: "GRID"
+    label: ""
     description: "Präfix für Client-Order-IDs"
 
 # -----------------------------------------------------------------------------
@@ -93,11 +96,13 @@ grid:
   upper_price:
     type: float
     default: 20.0
+    label: "Handelsrichtung"
     description: "Obere Preisgrenze des Grids"
 
   lower_price:
     type: float
     default: 10.0
+    label: ""
     description: "Untere Preisgrenze des Grids"
 
   grid_levels:
@@ -105,17 +110,20 @@ grid:
     default: 10
     min: 2
     max: 200
+    label: ""
     description: "Anzahl der Gitterlinien"
 
   grid_mode:
     type: select
-    options: ["arithmetic", "geometric"]
-    default: "arithmetic"
+    options: ["linear", "logarithmisch"]
+    default: "linear"
+    label: ""
+    description: "Legt fest, wie die Rasterstufen zwischen dem Mindest- und Höchstpreis verteilt sind (linear oder logarithmisch).“"
 
   min_price_step:
     type: float
     default: 0.0000001
-    description: "Minimales Tick-Intervall bei geometric mode"
+    description: "Minimales Tick-Intervall bei logarithmisch mode"
 
   base_order_size:
     type: float

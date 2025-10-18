@@ -89,8 +89,8 @@ Anzahl der Preisstufen zwischen unterer und oberer Grenze.
 
 ### `grid.grid_mode`
 Verteilung der Preisstufen:  
-- `arithmetic` → gleiche Abstände  
-- `geometric` → prozentuale Abstände
+- `linear` → gleiche Abstände  
+- `logarithmisch` → prozentuale Abstände
 
 ### `grid.min_price_step`
 Kleinster Preis-Schritt (Tick-Größe).  

@@ -54,10 +54,10 @@ class GridCalculator:
         n = int(self.config.grid_levels)
         mode = self.config.grid_mode
         
-        if mode == GridMode.ARITHMETIC:
-            prices = self._arithmetic_grid(lower, upper, n)
-        elif mode == GridMode.GEOMETRIC:
-            prices = self._geometric_grid(lower, upper, n)
+        if mode == GridMode.linear:
+            prices = self._linear_grid(lower, upper, n)
+        elif mode == GridMode.logarithmisch:
+            prices = self._logarithmisch_grid(lower, upper, n)
         else:
             raise ValueError(f"Unbekannter grid_mode: {mode}")
         
@@ -71,7 +71,7 @@ class GridCalculator:
         # self.logger.info(f"Preisraster berechnet: {len(prices)} Levels ({mode.value})")
         return prices
 
-    def _arithmetic_grid(self, lower: float, upper: float, n: int) -> List[float]:
+    def _linear_grid(self, lower: float, upper: float, n: int) -> List[float]:
         """
         Gleichmäßige Preisabstände
         
@@ -86,7 +86,7 @@ class GridCalculator:
         step = (upper - lower) / n
         return [lower + i * step for i in range(n + 1)]
 
-    def _geometric_grid(self, lower: float, upper: float, n: int) -> List[float]:
+    def _logarithmisch_grid(self, lower: float, upper: float, n: int) -> List[float]:
         """
         Prozentuale Preisabstände (logarithmisch)
         

@@ -16,8 +16,8 @@ from typing import List
 
 # === Enums für typsichere Auswahl ===
 class GridMode(str, Enum):
-    ARITHMETIC = "arithmetic"
-    GEOMETRIC = "geometric"
+    linear = "linear"
+    logarithmisch = "logarithmisch"
 
 
 class GridDirection(str, Enum):
@@ -66,7 +66,7 @@ class GridConfig(BaseModel):
     lower_price: float = Field(gt=0, description="Untere Preisgrenze")
 
     grid_levels: int = Field(ge=2, le=100)
-    grid_mode: GridMode = GridMode.ARITHMETIC
+    grid_mode: GridMode = GridMode.linear
     min_price_step: float = Field(default=0.0000001, gt=0)
 
     base_order_size: float = Field(gt=0)

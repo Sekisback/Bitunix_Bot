@@ -66,16 +66,15 @@ class GridConfigGUI:
         
         # Style für alle Comboboxen
         style = ttk.Style()
-        style.configure("TCombobox", 
-                    padding=4)  # Innenabstand oben/unten
-        
-        # Optional: Schriftgröße auch über Style
-        style.configure("TCombobox", padding=6)
+        # Coin-Dropdown
+        style.configure("TCombobox", padding=4, arrowsize=14, font=("Arial", 12))
+        # Parameter-Dropdowns 
+        style.configure("Grid.TCombobox", padding=(4, 1, 2, 1), relief="flat",  arrowsize=12, font=("Arial", 9))
         
         # Layout erstellen
         self._create_layout()
 
-        # ⭐ Chart-Canvas HIER erstellen (vor _load_coins)
+        # Chart-Canvas HIER erstellen (vor _load_coins)
         self._setup_chart()
         
         # Coins laden
@@ -117,17 +116,14 @@ class GridConfigGUI:
         # Header
         header = tk.Label(
             content,
-            text="GRID Bot Config",
-            font=("Arial", 16, "bold"),
+            text="------------------ GRID BOT CONFIG -------------------",
+            font=("Arial", 12, ),
             bg="#1f1f1f",
-            fg="#ffffff",
+            fg="#5c5c5c",
             anchor="center"
         )
         header.pack(fill=tk.X, pady=(5, 0))
         
-        # Separator
-        ttk.Separator(content, orient='horizontal').pack(fill='x', pady=(5, 0))
-
         # === COIN SELECTOR + MODE SWITCH (eine Zeile) ===
         coin_row = tk.Frame(content, bg="#2b2b2b")
         coin_row.pack(fill=tk.X, pady=(10, 10))
@@ -136,8 +132,6 @@ class GridConfigGUI:
             coin_row,
             textvariable=self.selected_coin,
             state="readonly",
-            width=10,
-            font=("Arial", 14)
         )
         self.coin_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         self.coin_dropdown.bind("<<ComboboxSelected>>", self._on_coin_select)
@@ -150,12 +144,11 @@ class GridConfigGUI:
             fg="#ffffff",
             activebackground="#5c5c5c",
             relief="raised",
-            bd=2,
+            bd=0,
             width=2,
             command=self._toggle_source_mode
         )
         self.mode_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0)
-
 
         # === TIMEFRAME BUTTONS (alle 6 in einer Reihe, flach) ===
         tf_container = tk.Frame(content, bg="#2b2b2b")
@@ -169,14 +162,11 @@ class GridConfigGUI:
         for col in range(6):
             tf_row.grid_columnconfigure(col, weight=1, uniform="tf")
         
-        # Button-Größe: flach
-        btn_h = 1
-        
         for i, tf in enumerate(["1M", "5M", "15M", "1H", "4H", "1D"]):
             btn = tk.Button(
                 tf_row,
                 text=tf,
-                height=btn_h,
+                height=1,
                 font=("Arial", 10, "bold"),
                 bg="#3a3a3a",
                 fg="#ffffff",
@@ -188,7 +178,85 @@ class GridConfigGUI:
             padx = (0, 2) if i < 5 else (0, 0)
             btn.grid(row=0, column=i, sticky="ew", padx=padx)
 
-                    
+        # === GRID PARAMETER SECTION ===
+        grid_section = tk.Frame(content, bg="#1f1f1f")
+        grid_section.pack(fill=tk.X, pady=(0, 10))
+
+        title = tk.Label(
+            grid_section,
+            text="------------------- GRID-PARAMETER -------------------",
+            font=("Arial", 10),
+            fg="#888888",
+            bg="#1f1f1f",
+            anchor="center"
+        )
+        title.pack(fill=tk.X, pady=(0, 5))
+
+        # Container für spätere Eingabefelder
+        form_frame = tk.Frame(grid_section, bg="#1f1f1f")
+        form_frame.pack(fill=tk.X, pady=(0, 0))
+
+
+        # === GRID MODE (aus config_schema.yaml -> trading:) ===
+        try:
+            schema_path = self.root_dir / "gui" / "config_schema.yaml"
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_data = yaml.safe_load(f)
+
+            trading_schema = schema_data.get("trading", {})
+            grid_mode_field = trading_schema.get("grid_mode", {})
+
+            if isinstance(grid_mode_field, dict):
+                grid_mode_options = grid_mode_field.get("enum", [])
+                grid_mode_label = grid_mode_field.get("label", "Grid Mode")
+                grid_mode_description = grid_mode_field.get(
+                    "description", "Defines how grid levels are spaced between min and max price."
+                )
+                grid_mode_default = grid_mode_field.get("default", None)
+            else:
+                grid_mode_options = []
+                grid_mode_label = "Grid Mode"
+                grid_mode_description = ""
+                grid_mode_default = None
+
+            if not grid_mode_options:
+                grid_mode_options = ["linear", "logarithmic"]
+            if not grid_mode_default and grid_mode_options:
+                grid_mode_default = grid_mode_options[0]
+
+        except Exception as e:
+            print("⚠️ Fehler beim Laden von grid_mode:", e)
+            grid_mode_options = ["linear", "logarithmic"]
+            grid_mode_label = "Grid Mode"
+            grid_mode_description = ""
+            grid_mode_default = "linear"
+
+        # Zeile für GRID MODE
+        row = tk.Frame(form_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=5)
+
+        self.grid_mode_var = tk.StringVar(value=grid_mode_default)
+        grid_mode_dropdown = ttk.Combobox(
+            row,
+            textvariable=self.grid_mode_var,
+            values=grid_mode_options,
+            state="readonly",
+            width=12,
+            style="Grid.TCombobox"
+        )
+        grid_mode_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=False, padx=(0, 6))
+
+        lbl = tk.Label(
+            row,
+            text=grid_mode_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w"
+        )
+        lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+
         # === STATUS ===
         self.status_label = tk.Label(
             content,

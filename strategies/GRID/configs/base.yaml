@@ -44,8 +44,8 @@ grid:
   upper_price: 20.0                 # Obere Preisgrenze des Grids (Coin-spezifisch)
   lower_price: 10.0                 # Untere Preisgrenze des Grids (Coin-spezifisch)
   grid_levels: 10                   # Anzahl der Gitterlinien (ergibt grid_levels + 1 Preisniveaus)
-  grid_mode: "arithmetic"           # "arithmetic" oder "geometric" (Preisverteilung)
-  min_price_step: 0.0000001         # Minimales Tick-Intervall für Rundungen in grid_mode "geometric"
+  grid_mode: "linear"           # "linear" oder "logarithmisch" (Preisverteilung)
+  min_price_step: 0.0000001         # Minimales Tick-Intervall für Rundungen in grid_mode "logarithmisch"
 
   base_order_size: 0.01             # Grund-Ordergröße (Coin-spezifisch)
   active_reorder: true              # Nach Fill erneut Order am selben Level platzieren
