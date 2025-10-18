@@ -95,22 +95,22 @@ trading:
 grid:
   upper_price:
     type: float
-    default: 20.0
+    default: 0.78
     label: "Obere Preisrange"
     description: "Obere Preisgrenze des Grids"
 
   lower_price:
     type: float
-    default: 10.0
-    label: ""
+    default: 0.68
+    label: "Untere Preisrange"
     description: "Untere Preisgrenze des Grids"
 
   grid_levels:
     type: int
-    default: 10
+    default: 20
     min: 2
     max: 200
-    label: ""
+    label: "Anzahl Grids"
     description: "Anzahl der Gitterlinien"
 
   grid_mode:
@@ -128,6 +128,7 @@ grid:
   base_order_size:
     type: float
     default: 0.01
+    label: "Order Menge"
     description: "Grund-Ordergröße"
 
   active_reorder:
@@ -273,12 +274,14 @@ margin:
     type: select
     options: ["ISOLATION", "CROSS"]
     default: "ISOLATION"
+    label: "Margin Mode"
 
   leverage:
     type: int
     default: 3
     min: 1
     max: 125
+    label: "Leverage"
     
   auto_reduce_only:
     type: bool

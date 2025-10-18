@@ -31,7 +31,7 @@ class GridConfigGUI:
         self._running = True
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        
+       
         # Maximiere Fenster beim Start (plattformübergreifend)
         self._maximize_window()
         
@@ -68,9 +68,12 @@ class GridConfigGUI:
         
         # Style für alle Comboboxen
         style = ttk.Style()
+        # Einheitliches, neutrales Theme aktivieren
+        style.theme_use("clam")
         # Coin-Dropdown
         style.configure("TCombobox", padding=4, arrowsize=14, font=("Arial", 12))
-        # Einheitliche Optik für Dropdowns (Comboboxen)
+
+        # Style für Comboboxen
         style.configure(
             "Grid.TCombobox",
             font=("Arial", 10),
@@ -81,9 +84,20 @@ class GridConfigGUI:
             arrowsize=12
         )
         style.map("Grid.TCombobox",
+                font=[("readonly", ("Arial", 10))],
                 fieldbackground=[("readonly", "#d9d9d9")],
                 background=[("readonly", "#d9d9d9")],
                 foreground=[("readonly", "#000000")])
+
+        # Style für Entry-Felder
+        style.configure(
+            "Grid.TEntry",
+            font=("Arial", 10, "bold"),
+            padding=(6, 4, 6, 4),
+            fieldbackground="#d9d9d9",
+            foreground="#000000",
+            relief="flat"
+        )
                 
         # Layout erstellen
         self._create_layout()
@@ -287,7 +301,7 @@ class GridConfigGUI:
         # PARAMETER IN scrollable_frame
         # =========================================================================
         
-        # === GRID PARAMETER (vereinfachte, saubere Version) ===
+        # === GRID PARAMETER (vollständig YAML-basiert) ===
         grid_section = tk.Frame(scrollable_frame, bg="#1f1f1f")
         grid_section.pack(fill=tk.X, pady=(5, 10))
 
@@ -302,15 +316,20 @@ class GridConfigGUI:
         title.pack(fill=tk.X, pady=(0, 5))
 
         form_frame = tk.Frame(grid_section, bg="#1f1f1f")
-        form_frame.pack(fill=tk.X, pady=(0, 0), padx=(0, 2))  # Abstand zur Scrollbar
+        form_frame.pack(fill=tk.X, pady=(0, 0), padx=(0, 2))
 
-        # Schema einmalig laden
+        # === Schema einmalig laden ===
         schema_path = self.root_dir / "gui" / "config_schema.yaml"
         with open(schema_path, "r", encoding="utf-8") as f:
             schema_data = yaml.safe_load(f)
 
-        # Hilfsfunktion zum Erstellen einer Dropdown-Zeile
-        def create_dropdown_row(parent, label_text, options, default, var_attr, map_attr):
+        # --- Hilfsfunktion: Dropdown-Reihe ---
+        def create_dropdown_row(parent, section_dict, field_name, var_attr, map_attr):
+            field = section_dict.get(field_name, {})
+            label_text = field.get("label", field_name.replace("_", " ").title())
+            options = field.get("options", field.get("enum", []))
+            default = field.get("default", options[0] if options else "")
+
             row = tk.Frame(parent, bg="#1f1f1f")
             row.pack(fill=tk.X, pady=2)
 
@@ -321,15 +340,14 @@ class GridConfigGUI:
                 bg="#1f1f1f",
                 fg="#888888",
                 anchor="w",
-                width=18  # gleichmäßig ausgerichtet
+                width=18
             )
             lbl.pack(side=tk.LEFT, fill=tk.X)
 
-            display_opts = [opt.upper() for opt in options]
+            display_opts = [str(opt).upper() for opt in options]
             setattr(self, map_attr, {opt.upper(): opt for opt in options})
 
-            default_display = default.upper() if default else display_opts[0]
-            var = tk.StringVar(value=default_display)
+            var = tk.StringVar(value=str(default).upper())
             setattr(self, var_attr, var)
 
             cb = ttk.Combobox(
@@ -337,31 +355,22 @@ class GridConfigGUI:
                 textvariable=var,
                 values=display_opts,
                 state="readonly",
-                width=18,          # gleich wie Entry-Felder
-                style="Grid.TCombobox",
-                font=("Arial", 10) # explizit, falls Style überschrieben wird
+                width=18,
+                style="Grid.TCombobox"
             )
-            cb.pack(side=tk.RIGHT, ipadx=6, ipady=3)
+            cb.pack(side=tk.RIGHT, ipadx=6, ipady=1)
 
-        # GRID DIRECTION
+        # === GRID DIRECTION (aus YAML: trading.grid_direction) ===
         trading_schema = schema_data.get("trading", {})
-        grid_dir = trading_schema.get("grid_direction", {})
-        grid_dir_label = grid_dir.get("label", "Grid Direction")
-        grid_dir_opts = grid_dir.get("options") or grid_dir.get("enum") or ["long", "short"]
-        grid_dir_default = grid_dir.get("default", grid_dir_opts[0])
-        create_dropdown_row(form_frame, grid_dir_label, grid_dir_opts, grid_dir_default,
+        create_dropdown_row(form_frame, trading_schema, "grid_direction",
                             "grid_dir_var", "grid_dir_map")
 
-        # GRID MODE
+        # === GRID MODE (aus YAML: grid.grid_mode) ===
         grid_schema = schema_data.get("grid", {})
-        grid_mode = grid_schema.get("grid_mode", {})
-        grid_mode_label = grid_mode.get("label", "Grid Mode")
-        grid_mode_opts = grid_mode.get("options") or grid_mode.get("enum") or ["linear", "logarithmic"]
-        grid_mode_default = grid_mode.get("default", grid_mode_opts[0])
-        create_dropdown_row(form_frame, grid_mode_label, grid_mode_opts, grid_mode_default,
+        create_dropdown_row(form_frame, grid_schema, "grid_mode",
                             "grid_mode_var", "grid_mode_map")
-        
-        # === UPPER PRICE ===
+
+        # === UPPER PRICE (aus YAML: grid.upper_price) ===
         upper_field = grid_schema.get("upper_price", {})
         upper_label = upper_field.get("label", "Upper Price")
         upper_default = upper_field.get("default", 0.0)
@@ -369,7 +378,7 @@ class GridConfigGUI:
         row = tk.Frame(form_frame, bg="#1f1f1f")
         row.pack(fill=tk.X, pady=4)
 
-        lbl = tk.Label(
+        tk.Label(
             row,
             text=upper_label,
             font=("Arial", 10),
@@ -377,76 +386,287 @@ class GridConfigGUI:
             fg="#888888",
             anchor="w",
             width=18
-        )
-        lbl.pack(side=tk.LEFT, fill=tk.X)
+        ).pack(side=tk.LEFT, fill=tk.X)
 
         self.upper_price_var = tk.DoubleVar(value=float(upper_default))
         validate_float = (self.root.register(lambda v: v.replace(".", "", 1).isdigit() or v == ""), "%P")
 
-        entry = tk.Entry(
+        ttk.Entry(
             row,
             textvariable=self.upper_price_var,
-            font=("Arial", 10),
-            bg="#d9d9d9",
-            fg="#000000",
-            relief="flat",
-            width=18,  # gleich wie Combobox
+            width=18,
+            style="Grid.TEntry",
             validate="key",
             validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
+
+        # === LOWER PRICE (aus YAML: grid.lower_price) ===
+        lower_field = grid_schema.get("lower_price", {})
+        lower_label = lower_field.get("label", "Lower Price")
+        lower_default = lower_field.get("default", 0.0)
+
+        row = tk.Frame(form_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=lower_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.lower_price_var = tk.DoubleVar(value=float(lower_default))
+        validate_float = (self.root.register(lambda v: v.replace(".", "", 1).isdigit() or v == ""), "%P")
+
+        ttk.Entry(
+            row,
+            textvariable=self.lower_price_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
+
+        # === GRID LEVELS (aus YAML: grid.grid_levels) ===
+        levels_field = grid_schema.get("grid_levels", {})
+        levels_label = levels_field.get("label", "Grid Levels")
+        levels_default = levels_field.get("default", 10)
+        levels_min = levels_field.get("min", 1)
+        levels_max = levels_field.get("max", 200)
+
+        row = tk.Frame(form_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=levels_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        def validate_int_in_range(v):
+            if v == "":
+                return True
+            if v.isdigit():
+                val = int(v)
+                return levels_min <= val <= levels_max
+            return False
+
+        validate_int = (self.root.register(validate_int_in_range), "%P")
+
+        self.grid_levels_var = tk.IntVar(value=int(levels_default))
+        ttk.Entry(
+            row,
+            textvariable=self.grid_levels_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_int
+        ).pack(side=tk.RIGHT)
+
+        # ================================================================
+        # TRADING PARAMETER (vollständig YAML-basiert)
+        # ================================================================
+        trading_section = tk.Frame(scrollable_frame, bg="#1f1f1f")
+        trading_section.pack(fill=tk.X, pady=(10, 10))
+
+        tk.Label(
+            trading_section,
+            text="------------------- TRADING-PARAMETER -------------------",
+            font=("Arial", 10),
+            fg="#888888",
+            bg="#1f1f1f",
+            anchor="center"
+        ).pack(fill=tk.X, pady=(0, 5))
+
+        form_frame_trading = tk.Frame(trading_section, bg="#1f1f1f")
+        form_frame_trading.pack(fill=tk.X, pady=(0, 0), padx=(0, 2))
+
+        # === MARGIN MODE (aus YAML: margin.mode) ===
+        margin_data = schema_data.get("margin", {}).get("mode", {})
+        margin_label = margin_data.get("label", "Margin Mode")
+        margin_options = margin_data.get("options", [])
+        margin_default = margin_data.get("default", margin_options[0] if margin_options else "")
+
+        row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=margin_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.margin_mode_var = tk.StringVar(value=margin_default)
+        self.margin_mode_map = {opt: opt for opt in margin_options}
+
+        ttk.Combobox(
+            row,
+            textvariable=self.margin_mode_var,
+            values=margin_options,
+            state="readonly",
+            width=18,
+            style="Grid.TCombobox"
+        ).pack(side=tk.RIGHT)
+
+
+        # === LEVERAGE (aus YAML: trading.leverage) ===
+        leverage_field = schema_data.get("margin", {}).get("leverage", {})
+        leverage_label = leverage_field.get("label", "Leverage")
+        leverage_default = leverage_field.get("default", 20)
+        leverage_min = leverage_field.get("min", 1)
+        leverage_max = leverage_field.get("max", 125)
+
+        row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=leverage_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        def validate_int_in_range(v):
+            if v == "":
+                return True
+            if v.isdigit():
+                val = int(v)
+                return leverage_min <= val <= leverage_max
+            return False
+
+        validate_int = (self.root.register(validate_int_in_range), "%P")
+
+        self.leverage_var = tk.IntVar(value=int(leverage_default))
+        ttk.Entry(
+            row,
+            textvariable=self.leverage_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_int
+        ).pack(side=tk.RIGHT)
+
+        # === TP MODE (aus YAML: grid.tp_mode) ===
+        tp_mode_field = grid_schema.get("tp_mode", {})
+        tp_mode_label = tp_mode_field.get("label", "TP Mode")
+        tp_mode_options = tp_mode_field.get("options", [])
+        tp_mode_default = tp_mode_field.get("default", tp_mode_options[0] if tp_mode_options else "")
+
+        # Übersetzungstabelle GUI <-> Config
+        display_map = {
+            "percent": "PROZENT",
+            "next_grid": "NÄCHSTES GRID"
+        }
+
+        tp_mode_display = [display_map.get(opt, opt.upper()) for opt in tp_mode_options]
+
+        row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=tp_mode_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        # Mapping GUI → Config
+        self.tp_mode_map = {display_map.get(opt, opt.upper()): opt for opt in tp_mode_options}
+
+        # Defaultanzeige deutsch
+        default_display = display_map.get(tp_mode_default, tp_mode_default.upper())
+        self.tp_mode_var = tk.StringVar(value=default_display)
+
+        cb = ttk.Combobox(
+            row,
+            textvariable=self.tp_mode_var,
+            values=tp_mode_display,
+            state="readonly",
+            width=18,
+            style="Grid.TCombobox"
         )
-        entry.pack(side=tk.RIGHT, ipadx=6, ipady=3)
+        cb.pack(side=tk.RIGHT)
+
+        # === TAKE PROFIT PCT (aus YAML: grid.take_profit_pct) ===
+        take_profit_field = grid_schema.get("take_profit_pct", {})
+        take_profit_label = take_profit_field.get("label", "Take Profit (%)")
+        take_profit_default = take_profit_field.get("default", 0.003)
+        visible_if = take_profit_field.get("visible_if", {})  # {"tp_mode": "percent"}
+
+        # Frame erstellen, aber NICHT sofort packen!
+        self.take_profit_row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+
+        tk.Label(
+            self.take_profit_row,
+            text=take_profit_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.take_profit_var = tk.DoubleVar(value=float(take_profit_default))
+        validate_float = (self.root.register(lambda v: v.replace(".", "", 1).isdigit() or v == ""), "%P")
+
+        ttk.Entry(
+            self.take_profit_row,
+            textvariable=self.take_profit_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
 
 
+        # =========================================================================
+        # Sichtbarkeits
+        # =========================================================================
+        # === Sichtbarkeits-Logik basierend auf visible_if ===
+        def update_take_profit_visibility(*_):
+            """Zeigt oder versteckt das Feld 'take_profit_pct' dynamisch"""
+            if not visible_if:
+                return  # kein Sichtbarkeitskriterium -> immer sichtbar
 
+            target_key, required_value = next(iter(visible_if.items()))  # tp_mode, percent
+            current_display_value = self.tp_mode_var.get()  # z. B. "PROZENT" oder "NÄCHSTES GRID"
+            current_config_value = self.tp_mode_map.get(current_display_value)  # → percent / next_grid
 
+            if target_key == "tp_mode" and current_config_value == required_value:
+                # Feld sichtbar machen (falls noch nicht)
+                if not self.take_profit_row.winfo_ismapped():
+                    self.take_profit_row.pack(fill=tk.X, pady=4)
+            else:
+                # Feld ausblenden (falls sichtbar)
+                if self.take_profit_row.winfo_ismapped():
+                    self.take_profit_row.pack_forget()
 
-        # # === WEITERE SECTIONS (für genug Inhalt zum Scrollen) ===
-        # for section_name in ["HEDGE", "MARGIN", "RISK", "STRATEGY", "LOGGING", "SYSTEM"]:
-        #     section = tk.Frame(scrollable_frame, bg="#1f1f1f")
-        #     section.pack(fill=tk.X, pady=(0, 10))
-            
-        #     section_title = tk.Label(
-        #         section,
-        #         text=f"------------------- {section_name} -------------------",
-        #         font=("Arial", 10),
-        #         fg="#888888",
-        #         bg="#1f1f1f",
-        #         anchor="center"
-        #     )
-        #     section_title.pack(fill=tk.X, pady=(0, 15))
-            
-        #     # Viele Felder damit es scrollbar wird
-        #     for i in range(8):
-        #         row = tk.Frame(section, bg="#1f1f1f")
-        #         row.pack(fill=tk.X, pady=3)
-                
-        #         lbl = tk.Label(
-        #             row,
-        #             text=f"{section_name} Param {i+1}",
-        #             font=("Arial", 9),
-        #             bg="#1f1f1f",
-        #             fg="#888888",
-        #             anchor="w"
-        #         )
-        #         lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 16))
-                
-        #         entry = tk.Entry(
-        #             row,
-        #             font=("Arial", 9),
-        #             bg="#2b2b2b",
-        #             fg="#ffffff",
-        #             insertbackground="#ffffff",
-        #             relief="flat",
-        #             width=12
-        #         )
-        #         entry.insert(0, "0.0")
-        #         entry.pack(side=tk.LEFT)
-        
+        # --- Initialzustand + Binding aktivieren ---
+        self.tp_mode_var.trace_add("write", update_take_profit_visibility)
+        # Initial einmal ausführen, um Zustand direkt zu setzen
+        update_take_profit_visibility()
+
 
         # =========================================================================
         # MOUSEWHEEL BINDING (plattformübergreifend)
         # =========================================================================
-
         def _on_mousewheel(event):
             """Plattformübergreifendes Scroll-Handling"""
             if event.num == 4:  # Linux scroll up
@@ -782,7 +1002,10 @@ class GridConfigGUI:
                     "grid_direction": self.grid_dir_map.get(self.grid_dir_var.get(), "").lower()
                 }
                 grid = {
-                    "grid_mode": self.grid_mode_map.get(self.grid_mode_var.get(), "").lower()
+                    "grid_mode": self.grid_mode_map.get(self.grid_mode_var.get(), "").lower(),
+                    "upper_price": float(self.upper_price_var.get()),
+                    "lower_price": float(self.lower_price_var.get()),
+                    "grid_levels": int(self.grid_levels_var.get())
                 }
 
                 config_data = {
