@@ -70,9 +70,21 @@ class GridConfigGUI:
         style = ttk.Style()
         # Coin-Dropdown
         style.configure("TCombobox", padding=4, arrowsize=14, font=("Arial", 12))
-        # Parameter-Dropdowns 
-        style.configure("Grid.TCombobox", padding=(4, 1, 2, 1), relief="flat",  arrowsize=12, font=("Arial", 9))
-        
+        # Einheitliche Optik für Dropdowns (Comboboxen)
+        style.configure(
+            "Grid.TCombobox",
+            font=("Arial", 10),
+            padding=(6, 4, 6, 4),
+            fieldbackground="#d9d9d9",
+            background="#d9d9d9",
+            foreground="#000000",
+            arrowsize=12
+        )
+        style.map("Grid.TCombobox",
+                fieldbackground=[("readonly", "#d9d9d9")],
+                background=[("readonly", "#d9d9d9")],
+                foreground=[("readonly", "#000000")])
+                
         # Layout erstellen
         self._create_layout()
 
@@ -91,7 +103,6 @@ class GridConfigGUI:
         y = int((screen_h / 2) - (height / 2))
         self.root.geometry(f"{width}x{height}+{x}+{y}")
 
-    
     def _create_layout(self):
         """Erstellt das Hauptlayout: Links Chart, Rechts Menu"""
         
@@ -109,7 +120,7 @@ class GridConfigGUI:
         self.menu_frame = tk.Frame(
             self.root, 
             bg="#1f1f1f", 
-            width=300,
+            width=320,
             highlightthickness=1,
             highlightcolor="#4a4a4a",
             highlightbackground="#4a4a4a"
@@ -121,13 +132,13 @@ class GridConfigGUI:
         self._create_menu()
     
     def _create_menu(self):
-        """Erstellt das rechte Menu"""
+        """Erstellt das rechte Menu mit funktionierender Scrollbar"""
         
         # === Hauptcontainer ===
         content = tk.Frame(self.menu_frame, bg="#1f1f1f")
         content.pack(fill=tk.BOTH, expand=True, padx=15)
         
-        # === HEADER ===
+        # === HEADER (oben fixiert) ===
         header = tk.Label(
             content,
             text="------------------ GRID BOT CONFIG -------------------",
@@ -136,13 +147,12 @@ class GridConfigGUI:
             fg="#5c5c5c",
             anchor="center"
         )
-        header.pack(fill=tk.X, pady=(5, 0))
+        header.pack(side=tk.TOP, fill=tk.X, pady=(5, 0))
         
-        # === COIN SELECTOR + SPEICHERN + RESET + MODE BUTTONS ===
+        # === COIN SELECTOR + BUTTONS (oben fixiert) ===
         coin_row = tk.Frame(content, bg="#2b2b2b")
-        coin_row.pack(fill=tk.X, pady=(10, 10))
+        coin_row.pack(side=tk.TOP, fill=tk.X, pady=(10, 10))
 
-        # Coin-Auswahl (etwas schmaler, um Platz für 3 Buttons zu lassen)
         self.coin_dropdown = ttk.Combobox(
             coin_row,
             textvariable=self.selected_coin,
@@ -153,7 +163,6 @@ class GridConfigGUI:
         self.coin_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         self.coin_dropdown.bind("<<ComboboxSelected>>", self._on_coin_select)
 
-        # 💾 SPEICHERN
         self.save_button = tk.Button(
             coin_row,
             text="💾",
@@ -168,7 +177,6 @@ class GridConfigGUI:
         )
         self.save_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
 
-        # 🔁 RESET (Defaults aus config_schema.yaml)
         self.reset_button = tk.Button(
             coin_row,
             text="🔁",
@@ -183,7 +191,6 @@ class GridConfigGUI:
         )
         self.reset_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
 
-        # 🌐 MODE SWITCH (API ↔ Local Config)
         self.mode_button = tk.Button(
             coin_row,
             text="🌐",
@@ -198,9 +205,9 @@ class GridConfigGUI:
         )
         self.mode_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
 
-        # === TIMEFRAME BUTTONS ===
+        # === TIMEFRAME BUTTONS (oben fixiert) ===
         tf_container = tk.Frame(content, bg="#2b2b2b")
-        tf_container.pack(fill=tk.X, pady=(5, 20))
+        tf_container.pack(side=tk.TOP, fill=tk.X, pady=(5, 10))
 
         tf_row = tk.Frame(tf_container, bg="#2b2b2b")
         tf_row.pack(fill=tk.X)
@@ -223,9 +230,66 @@ class GridConfigGUI:
             padx = (0, 2) if i < 5 else (0, 0)
             btn.grid(row=0, column=i, sticky="ew", padx=padx)
 
-        # === GRID PARAMETER SECTION ===
-        grid_section = tk.Frame(content, bg="#1f1f1f")
-        grid_section.pack(fill=tk.X, pady=(0, 10))
+        # === STATUS-LABEL (unten fixiert) ===
+        self.status_label = tk.Label(
+            content,
+            text="ℹ️ Bereit...",
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            wraplength=260,
+            justify=tk.LEFT,
+            anchor="w"
+        )
+        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=(10, 5))
+
+        # =========================================================================
+        # SCROLLBARER BEREICH (nimmt restlichen Platz in der Mitte)
+        # =========================================================================
+        
+        # Canvas direkt in content
+        canvas = tk.Canvas(content, bg="#1f1f1f", highlightthickness=0)
+        
+        # Scrollbar (schmaler Balken)
+        scrollbar = tk.Scrollbar(
+            content, 
+            orient="vertical", 
+            command=canvas.yview,
+            width=8,
+            bg="#4a4a4a"
+        )
+        
+        # Scrollable Frame
+        scrollable_frame = tk.Frame(canvas, bg="#1f1f1f")
+        
+        # Canvas Window erstellen
+        canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        
+        # Scrollregion updaten
+        def update_scroll():
+            canvas.update_idletasks()
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        scrollable_frame.bind("<Configure>", lambda e: update_scroll())
+        
+        # Canvas-Breite an Window anpassen
+        def resize_canvas(event):
+            canvas.itemconfig(canvas_window, width=event.width)
+        
+        canvas.bind("<Configure>", resize_canvas)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Canvas und Scrollbar packen (mit rechtem Padding)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))  # 5px rechts
+
+        # =========================================================================
+        # PARAMETER IN scrollable_frame
+        # =========================================================================
+        
+        # === GRID PARAMETER (vereinfachte, saubere Version) ===
+        grid_section = tk.Frame(scrollable_frame, bg="#1f1f1f")
+        grid_section.pack(fill=tk.X, pady=(5, 10))
 
         title = tk.Label(
             grid_section,
@@ -238,138 +302,180 @@ class GridConfigGUI:
         title.pack(fill=tk.X, pady=(0, 5))
 
         form_frame = tk.Frame(grid_section, bg="#1f1f1f")
-        form_frame.pack(fill=tk.X, pady=(0, 0))
+        form_frame.pack(fill=tk.X, pady=(0, 0), padx=(0, 2))  # Abstand zur Scrollbar
 
-        # === GRID DIRECTION (aus config_schema.yaml -> trading:) ===
-        try:
-            schema_path = self.root_dir / "gui" / "config_schema.yaml"
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema_data = yaml.safe_load(f)
+        # Schema einmalig laden
+        schema_path = self.root_dir / "gui" / "config_schema.yaml"
+        with open(schema_path, "r", encoding="utf-8") as f:
+            schema_data = yaml.safe_load(f)
 
-            trading_schema = schema_data.get("trading", {})
-            grid_dir_field = trading_schema.get("grid_direction", {})
+        # Hilfsfunktion zum Erstellen einer Dropdown-Zeile
+        def create_dropdown_row(parent, label_text, options, default, var_attr, map_attr):
+            row = tk.Frame(parent, bg="#1f1f1f")
+            row.pack(fill=tk.X, pady=2)
 
-            if isinstance(grid_dir_field, dict):
-                grid_dir_options = grid_dir_field.get("options", []) or grid_dir_field.get("enum", [])
-                grid_dir_label = grid_dir_field.get("label", "Grid Direction")
-                grid_dir_default = grid_dir_field.get("default", None)
-            else:
-                grid_dir_options = []
-                grid_dir_label = "Grid Direction"
-                grid_dir_default = None
+            lbl = tk.Label(
+                row,
+                text=label_text,
+                font=("Arial", 10),
+                bg="#1f1f1f",
+                fg="#888888",
+                anchor="w",
+                width=18  # gleichmäßig ausgerichtet
+            )
+            lbl.pack(side=tk.LEFT, fill=tk.X)
 
-            if not grid_dir_options or not isinstance(grid_dir_options, list):
-                grid_dir_options = ["long", "short"]
-            if not grid_dir_default and grid_dir_options:
-                grid_dir_default = grid_dir_options[0]
+            display_opts = [opt.upper() for opt in options]
+            setattr(self, map_attr, {opt.upper(): opt for opt in options})
 
-            grid_dir_display = [opt.upper() for opt in grid_dir_options]
-            self.grid_dir_map = {opt.upper(): opt for opt in grid_dir_options}
+            default_display = default.upper() if default else display_opts[0]
+            var = tk.StringVar(value=default_display)
+            setattr(self, var_attr, var)
 
-        except Exception as e:
-            print("⚠️ Fehler beim Laden von trading.grid_direction:", e)
-            grid_dir_options = ["long", "short"]
-            grid_dir_label = "Grid Direction"
-            grid_dir_default = "long"
-            grid_dir_display = [opt.upper() for opt in grid_dir_options]
-            self.grid_dir_map = {opt.upper(): opt for opt in grid_dir_options}
+            cb = ttk.Combobox(
+                row,
+                textvariable=var,
+                values=display_opts,
+                state="readonly",
+                width=18,          # gleich wie Entry-Felder
+                style="Grid.TCombobox",
+                font=("Arial", 10) # explizit, falls Style überschrieben wird
+            )
+            cb.pack(side=tk.RIGHT, ipadx=6, ipady=3)
+
+        # GRID DIRECTION
+        trading_schema = schema_data.get("trading", {})
+        grid_dir = trading_schema.get("grid_direction", {})
+        grid_dir_label = grid_dir.get("label", "Grid Direction")
+        grid_dir_opts = grid_dir.get("options") or grid_dir.get("enum") or ["long", "short"]
+        grid_dir_default = grid_dir.get("default", grid_dir_opts[0])
+        create_dropdown_row(form_frame, grid_dir_label, grid_dir_opts, grid_dir_default,
+                            "grid_dir_var", "grid_dir_map")
+
+        # GRID MODE
+        grid_schema = schema_data.get("grid", {})
+        grid_mode = grid_schema.get("grid_mode", {})
+        grid_mode_label = grid_mode.get("label", "Grid Mode")
+        grid_mode_opts = grid_mode.get("options") or grid_mode.get("enum") or ["linear", "logarithmic"]
+        grid_mode_default = grid_mode.get("default", grid_mode_opts[0])
+        create_dropdown_row(form_frame, grid_mode_label, grid_mode_opts, grid_mode_default,
+                            "grid_mode_var", "grid_mode_map")
+        
+        # === UPPER PRICE ===
+        upper_field = grid_schema.get("upper_price", {})
+        upper_label = upper_field.get("label", "Upper Price")
+        upper_default = upper_field.get("default", 0.0)
 
         row = tk.Frame(form_frame, bg="#1f1f1f")
-        row.pack(fill=tk.X, pady=5)
-
-        default_display = grid_dir_default.upper() if grid_dir_default else ""
-        self.grid_dir_var = tk.StringVar(value=default_display)
-        grid_dir_dropdown = ttk.Combobox(
-            row,
-            textvariable=self.grid_dir_var,
-            values=grid_dir_display,
-            state="readonly",
-            width=12,
-            style="Grid.TCombobox"
-        )
-        grid_dir_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=False, padx=(0, 6))
+        row.pack(fill=tk.X, pady=4)
 
         lbl = tk.Label(
             row,
-            text=grid_dir_label,
+            text=upper_label,
             font=("Arial", 10),
             bg="#1f1f1f",
             fg="#888888",
-            anchor="w"
+            anchor="w",
+            width=18
         )
-        lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        lbl.pack(side=tk.LEFT, fill=tk.X)
 
-        # === GRID MODE (aus config_schema.yaml -> grid:) ===
-        try:
-            schema_path = self.root_dir / "gui" / "config_schema.yaml"
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema_data = yaml.safe_load(f)
+        self.upper_price_var = tk.DoubleVar(value=float(upper_default))
+        validate_float = (self.root.register(lambda v: v.replace(".", "", 1).isdigit() or v == ""), "%P")
 
-            grid_schema = schema_data.get("grid", {})
-            grid_mode_field = grid_schema.get("grid_mode", {})
+        entry = tk.Entry(
+            row,
+            textvariable=self.upper_price_var,
+            font=("Arial", 10),
+            bg="#d9d9d9",
+            fg="#000000",
+            relief="flat",
+            width=18,  # gleich wie Combobox
+            validate="key",
+            validatecommand=validate_float
+        )
+        entry.pack(side=tk.RIGHT, ipadx=6, ipady=3)
 
-            if isinstance(grid_mode_field, dict):
-                grid_mode_options = grid_mode_field.get("options", []) or grid_mode_field.get("enum", [])
-                grid_mode_label = grid_mode_field.get("label", "Grid Mode")
-                grid_mode_default = grid_mode_field.get("default", None)
+
+
+
+
+        # # === WEITERE SECTIONS (für genug Inhalt zum Scrollen) ===
+        # for section_name in ["HEDGE", "MARGIN", "RISK", "STRATEGY", "LOGGING", "SYSTEM"]:
+        #     section = tk.Frame(scrollable_frame, bg="#1f1f1f")
+        #     section.pack(fill=tk.X, pady=(0, 10))
+            
+        #     section_title = tk.Label(
+        #         section,
+        #         text=f"------------------- {section_name} -------------------",
+        #         font=("Arial", 10),
+        #         fg="#888888",
+        #         bg="#1f1f1f",
+        #         anchor="center"
+        #     )
+        #     section_title.pack(fill=tk.X, pady=(0, 15))
+            
+        #     # Viele Felder damit es scrollbar wird
+        #     for i in range(8):
+        #         row = tk.Frame(section, bg="#1f1f1f")
+        #         row.pack(fill=tk.X, pady=3)
+                
+        #         lbl = tk.Label(
+        #             row,
+        #             text=f"{section_name} Param {i+1}",
+        #             font=("Arial", 9),
+        #             bg="#1f1f1f",
+        #             fg="#888888",
+        #             anchor="w"
+        #         )
+        #         lbl.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 16))
+                
+        #         entry = tk.Entry(
+        #             row,
+        #             font=("Arial", 9),
+        #             bg="#2b2b2b",
+        #             fg="#ffffff",
+        #             insertbackground="#ffffff",
+        #             relief="flat",
+        #             width=12
+        #         )
+        #         entry.insert(0, "0.0")
+        #         entry.pack(side=tk.LEFT)
+        
+
+        # =========================================================================
+        # MOUSEWHEEL BINDING (plattformübergreifend)
+        # =========================================================================
+
+        def _on_mousewheel(event):
+            """Plattformübergreifendes Scroll-Handling"""
+            if event.num == 4:  # Linux scroll up
+                canvas.yview_scroll(-1, "units")
+            elif event.num == 5:  # Linux scroll down
+                canvas.yview_scroll(1, "units")
             else:
-                grid_mode_options = []
-                grid_mode_label = "Grid Mode"
-                grid_mode_default = None
+                # Windows / macOS
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
-            if not grid_mode_options or not isinstance(grid_mode_options, list):
-                grid_mode_options = ["linear", "logarithmic"]
-            if not grid_mode_default and grid_mode_options:
-                grid_mode_default = grid_mode_options[0]
+        # Events binden, aber nur wenn Maus über dem Bereich ist
+        def _bind_to_mousewheel(event):
+            system = self.root.tk.call('tk', 'windowingsystem')
+            if system == 'x11':  # Linux
+                canvas.bind_all("<Button-4>", _on_mousewheel)
+                canvas.bind_all("<Button-5>", _on_mousewheel)
+            else:  # Windows oder macOS
+                canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
-            grid_mode_display = [opt.upper() for opt in grid_mode_options]
-            self.grid_mode_map = {opt.upper(): opt for opt in grid_mode_options}
+        def _unbind_from_mousewheel(event):
+            system = self.root.tk.call('tk', 'windowingsystem')
+            if system == 'x11':  # Linux
+                canvas.unbind_all("<Button-4>")
+                canvas.unbind_all("<Button-5>")
+            else:
+                canvas.unbind_all("<MouseWheel>")
 
-        except Exception as e:
-            print("⚠️ Fehler beim Laden von grid.grid_mode:", e)
-            grid_mode_options = ["linear", "logarithmic"]
-            grid_mode_label = "Grid Mode"
-            grid_mode_default = "linear"
-            grid_mode_display = [opt.upper() for opt in grid_mode_options]
-            self.grid_mode_map = {opt.upper(): opt for opt in grid_mode_options}
-
-        row = tk.Frame(form_frame, bg="#1f1f1f")
-        row.pack(fill=tk.X, pady=5)
-
-        default_display_mode = grid_mode_default.upper() if grid_mode_default else ""
-        self.grid_mode_var = tk.StringVar(value=default_display_mode)
-        grid_mode_dropdown = ttk.Combobox(
-            row,
-            textvariable=self.grid_mode_var,
-            values=grid_mode_display,
-            state="readonly",
-            width=12,
-            style="Grid.TCombobox"
-        )
-        grid_mode_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=False, padx=(0, 6))
-
-        lbl = tk.Label(
-            row,
-            text=grid_mode_label,
-            font=("Arial", 10),
-            bg="#1f1f1f",
-            fg="#888888",
-            anchor="w"
-        )
-        lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # === STATUS ===
-        self.status_label = tk.Label(
-            content,
-            text="ℹ️ Bereit...",
-            font=("Arial", 10),
-            bg="#1f1f1f",
-            fg="#888888",
-            wraplength=260,
-            justify=tk.LEFT,
-            anchor="w"
-        )
-        self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+        scrollable_frame.bind("<Enter>", _bind_to_mousewheel)
+        scrollable_frame.bind("<Leave>", _unbind_from_mousewheel)
 
 
     def _setup_chart(self):

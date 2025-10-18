@@ -96,7 +96,7 @@ grid:
   upper_price:
     type: float
     default: 20.0
-    label: "Handelsrichtung"
+    label: "Obere Preisrange"
     description: "Obere Preisgrenze des Grids"
 
   lower_price:
