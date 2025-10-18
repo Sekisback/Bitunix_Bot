@@ -117,7 +117,7 @@ grid:
     type: select
     options: ["linear", "logarithmisch"]
     default: "linear"
-    label: ""
+    label: "Rasterstufen"
     description: "Legt fest, wie die Rasterstufen zwischen dem Mindest- und Höchstpreis verteilt sind (linear oder logarithmisch).“"
 
   min_price_step:

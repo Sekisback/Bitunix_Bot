@@ -94,12 +94,24 @@ class GridConfigGUI:
         """Erstellt das Hauptlayout: Links Chart, Rechts Menu"""
         
         # ===== LINKS: Chart-Bereich =====
-        self.chart_frame = tk.Frame(self.root, bg="#1e1e1e")
+        self.chart_frame = tk.Frame(
+            self.root, 
+            highlightthickness=1,
+            highlightcolor="#4a4a4a",
+            highlightbackground="#4a4a4a"
+            )
         self.chart_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         
        
         # ===== RECHTS: Menu-Bereich =====
-        self.menu_frame = tk.Frame(self.root, bg="#1f1f1f", width=300)
+        self.menu_frame = tk.Frame(
+            self.root, 
+            bg="#1f1f1f", 
+            width=300,
+            highlightthickness=1,
+            highlightcolor="#4a4a4a",
+            highlightbackground="#4a4a4a"
+            )
         self.menu_frame.pack(side=tk.RIGHT, fill=tk.Y)
         self.menu_frame.pack_propagate(False)  # Fixiere Breite
         
@@ -109,33 +121,67 @@ class GridConfigGUI:
     def _create_menu(self):
         """Erstellt das rechte Menu"""
         
-        # Padding Container für alles
+        # === Hauptcontainer ===
         content = tk.Frame(self.menu_frame, bg="#1f1f1f")
         content.pack(fill=tk.BOTH, expand=True, padx=15)
         
-        # Header
+        # === HEADER ===
         header = tk.Label(
             content,
             text="------------------ GRID BOT CONFIG -------------------",
-            font=("Arial", 12, ),
+            font=("Arial", 12),
             bg="#1f1f1f",
             fg="#5c5c5c",
             anchor="center"
         )
         header.pack(fill=tk.X, pady=(5, 0))
         
-        # === COIN SELECTOR + MODE SWITCH (eine Zeile) ===
+        # === COIN SELECTOR + SPEICHERN + RESET + MODE BUTTONS ===
         coin_row = tk.Frame(content, bg="#2b2b2b")
         coin_row.pack(fill=tk.X, pady=(10, 10))
 
+        # Coin-Auswahl (etwas schmaler, um Platz für 3 Buttons zu lassen)
         self.coin_dropdown = ttk.Combobox(
             coin_row,
             textvariable=self.selected_coin,
             state="readonly",
+            width=12,
+            font=("Arial", 13)
         )
         self.coin_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 6))
         self.coin_dropdown.bind("<<ComboboxSelected>>", self._on_coin_select)
 
+        # 💾 SPEICHERN
+        self.save_button = tk.Button(
+            coin_row,
+            text="💾",
+            font=("Arial", 12),
+            bg="#4a4a4a",
+            fg="#ffffff",
+            activebackground="#5c5c5c",
+            relief="raised",
+            bd=0,
+            width=2,
+            command=self._save_current_config
+        )
+        self.save_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
+
+        # 🔁 RESET (Defaults aus config_schema.yaml)
+        self.reset_button = tk.Button(
+            coin_row,
+            text="🔁",
+            font=("Arial", 12),
+            bg="#4a4a4a",
+            fg="#ffffff",
+            activebackground="#5c5c5c",
+            relief="raised",
+            bd=0,
+            width=2,
+            command=self._reset_to_defaults
+        )
+        self.reset_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
+
+        # 🌐 MODE SWITCH (API ↔ Local Config)
         self.mode_button = tk.Button(
             coin_row,
             text="🌐",
@@ -148,20 +194,18 @@ class GridConfigGUI:
             width=2,
             command=self._toggle_source_mode
         )
-        self.mode_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0)
+        self.mode_button.pack(side=tk.RIGHT, fill=tk.Y, pady=0, padx=(0, 4))
 
-        # === TIMEFRAME BUTTONS (alle 6 in einer Reihe, flach) ===
+        # === TIMEFRAME BUTTONS ===
         tf_container = tk.Frame(content, bg="#2b2b2b")
         tf_container.pack(fill=tk.X, pady=(5, 20))
 
-        # Alle 6 Buttons in einer Reihe mit Grid für gleiche Größe
         tf_row = tk.Frame(tf_container, bg="#2b2b2b")
         tf_row.pack(fill=tk.X)
-        
-        # Grid konfigurieren: 6 Spalten mit gleichem Gewicht
+
         for col in range(6):
             tf_row.grid_columnconfigure(col, weight=1, uniform="tf")
-        
+
         for i, tf in enumerate(["1M", "5M", "15M", "1H", "4H", "1D"]):
             btn = tk.Button(
                 tf_row,
@@ -174,7 +218,6 @@ class GridConfigGUI:
                 relief="flat",
                 command=lambda t=tf: self._on_timeframe_select(t)
             )
-            # Grid-Position: Zeile 0, Spalte i, mit 2px Abstand
             padx = (0, 2) if i < 5 else (0, 0)
             btn.grid(row=0, column=i, sticky="ew", padx=padx)
 
@@ -192,54 +235,111 @@ class GridConfigGUI:
         )
         title.pack(fill=tk.X, pady=(0, 5))
 
-        # Container für spätere Eingabefelder
         form_frame = tk.Frame(grid_section, bg="#1f1f1f")
         form_frame.pack(fill=tk.X, pady=(0, 0))
 
-
-        # === GRID MODE (aus config_schema.yaml -> trading:) ===
+        # === GRID DIRECTION (aus config_schema.yaml -> trading:) ===
         try:
             schema_path = self.root_dir / "gui" / "config_schema.yaml"
             with open(schema_path, "r", encoding="utf-8") as f:
                 schema_data = yaml.safe_load(f)
 
             trading_schema = schema_data.get("trading", {})
-            grid_mode_field = trading_schema.get("grid_mode", {})
+            grid_dir_field = trading_schema.get("grid_direction", {})
+
+            if isinstance(grid_dir_field, dict):
+                grid_dir_options = grid_dir_field.get("options", []) or grid_dir_field.get("enum", [])
+                grid_dir_label = grid_dir_field.get("label", "Grid Direction")
+                grid_dir_default = grid_dir_field.get("default", None)
+            else:
+                grid_dir_options = []
+                grid_dir_label = "Grid Direction"
+                grid_dir_default = None
+
+            if not grid_dir_options or not isinstance(grid_dir_options, list):
+                grid_dir_options = ["long", "short"]
+            if not grid_dir_default and grid_dir_options:
+                grid_dir_default = grid_dir_options[0]
+
+            grid_dir_display = [opt.upper() for opt in grid_dir_options]
+            self.grid_dir_map = {opt.upper(): opt for opt in grid_dir_options}
+
+        except Exception as e:
+            print("⚠️ Fehler beim Laden von trading.grid_direction:", e)
+            grid_dir_options = ["long", "short"]
+            grid_dir_label = "Grid Direction"
+            grid_dir_default = "long"
+            grid_dir_display = [opt.upper() for opt in grid_dir_options]
+            self.grid_dir_map = {opt.upper(): opt for opt in grid_dir_options}
+
+        row = tk.Frame(form_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=5)
+
+        default_display = grid_dir_default.upper() if grid_dir_default else ""
+        self.grid_dir_var = tk.StringVar(value=default_display)
+        grid_dir_dropdown = ttk.Combobox(
+            row,
+            textvariable=self.grid_dir_var,
+            values=grid_dir_display,
+            state="readonly",
+            width=12,
+            style="Grid.TCombobox"
+        )
+        grid_dir_dropdown.pack(side=tk.LEFT, fill=tk.X, expand=False, padx=(0, 6))
+
+        lbl = tk.Label(
+            row,
+            text=grid_dir_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w"
+        )
+        lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # === GRID MODE (aus config_schema.yaml -> grid:) ===
+        try:
+            schema_path = self.root_dir / "gui" / "config_schema.yaml"
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_data = yaml.safe_load(f)
+
+            grid_schema = schema_data.get("grid", {})
+            grid_mode_field = grid_schema.get("grid_mode", {})
 
             if isinstance(grid_mode_field, dict):
-                grid_mode_options = grid_mode_field.get("enum", [])
+                grid_mode_options = grid_mode_field.get("options", []) or grid_mode_field.get("enum", [])
                 grid_mode_label = grid_mode_field.get("label", "Grid Mode")
-                grid_mode_description = grid_mode_field.get(
-                    "description", "Defines how grid levels are spaced between min and max price."
-                )
                 grid_mode_default = grid_mode_field.get("default", None)
             else:
                 grid_mode_options = []
                 grid_mode_label = "Grid Mode"
-                grid_mode_description = ""
                 grid_mode_default = None
 
-            if not grid_mode_options:
+            if not grid_mode_options or not isinstance(grid_mode_options, list):
                 grid_mode_options = ["linear", "logarithmic"]
             if not grid_mode_default and grid_mode_options:
                 grid_mode_default = grid_mode_options[0]
 
+            grid_mode_display = [opt.upper() for opt in grid_mode_options]
+            self.grid_mode_map = {opt.upper(): opt for opt in grid_mode_options}
+
         except Exception as e:
-            print("⚠️ Fehler beim Laden von grid_mode:", e)
+            print("⚠️ Fehler beim Laden von grid.grid_mode:", e)
             grid_mode_options = ["linear", "logarithmic"]
             grid_mode_label = "Grid Mode"
-            grid_mode_description = ""
             grid_mode_default = "linear"
+            grid_mode_display = [opt.upper() for opt in grid_mode_options]
+            self.grid_mode_map = {opt.upper(): opt for opt in grid_mode_options}
 
-        # Zeile für GRID MODE
         row = tk.Frame(form_frame, bg="#1f1f1f")
         row.pack(fill=tk.X, pady=5)
 
-        self.grid_mode_var = tk.StringVar(value=grid_mode_default)
+        default_display_mode = grid_mode_default.upper() if grid_mode_default else ""
+        self.grid_mode_var = tk.StringVar(value=default_display_mode)
         grid_mode_dropdown = ttk.Combobox(
             row,
             textvariable=self.grid_mode_var,
-            values=grid_mode_options,
+            values=grid_mode_display,
             state="readonly",
             width=12,
             style="Grid.TCombobox"
@@ -256,7 +356,6 @@ class GridConfigGUI:
         )
         lbl.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-
         # === STATUS ===
         self.status_label = tk.Label(
             content,
@@ -269,6 +368,7 @@ class GridConfigGUI:
             anchor="w"
         )
         self.status_label.pack(side=tk.BOTTOM, fill=tk.X, pady=10)
+
 
     def _setup_chart(self):
         """Erstellt Chart-Canvas einmalig"""
@@ -537,6 +637,104 @@ class GridConfigGUI:
         import sys
         sys.exit(0)
 
+    def _save_current_config(self):
+            """Speichert aktuelle GUI-Werte in die aktive oder neue YAML-Datei"""
+            try:
+                symbol = self.selected_coin.get()
+                if not symbol:
+                    self._update_status("⚠️ Kein Symbol ausgewählt")
+                    return
+
+                # === GUI-Werte holen ===
+                trading = {
+                    "grid_direction": self.grid_dir_map.get(self.grid_dir_var.get(), "").lower()
+                }
+                grid = {
+                    "grid_mode": self.grid_mode_map.get(self.grid_mode_var.get(), "").lower()
+                }
+
+                config_data = {
+                    "symbol": symbol,
+                    "trading": trading,
+                    "grid": grid
+                }
+
+                # === Zielpfad bestimmen ===
+                if self.use_local_configs and hasattr(self, "current_config_path") and self.current_config_path:
+                    save_path = self.current_config_path
+                else:
+                    save_path = self.config_dir / f"{symbol}.yaml"
+
+                # === YAML schreiben ===
+                with open(save_path, "w", encoding="utf-8") as f:
+                    yaml.dump(config_data, f, sort_keys=False, allow_unicode=True)
+
+                self._update_status(f"💾 Gespeichert: {save_path.name}")
+
+            except Exception as e:
+                print(f"❌ Fehler beim Speichern: {e}")
+                self._update_status("❌ Fehler beim Speichern der Config")
+
+
+    def _reset_to_defaults(self):
+        """Setzt GUI-Parameter auf die Default-Werte aus config_schema.yaml zurück"""
+        try:
+            schema_path = self.root_dir / "gui" / "config_schema.yaml"
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema_data = yaml.safe_load(f)
+
+            trading = schema_data.get("trading", {})
+            grid = schema_data.get("grid", {})
+
+            # Grid Direction
+            if "grid_direction" in trading and hasattr(self, "grid_dir_var"):
+                default_val = trading["grid_direction"].get("default", None)
+                if default_val:
+                    self.grid_dir_var.set(default_val.upper())
+
+            # Grid Mode
+            if "grid_mode" in grid and hasattr(self, "grid_mode_var"):
+                default_val = grid["grid_mode"].get("default", None)
+                if default_val:
+                    self.grid_mode_var.set(default_val.upper())
+
+            # Aktive Config zurücksetzen
+            self.current_config_path = None
+            self.use_local_configs = False
+            self._update_status("🔄 Auf Standardwerte zurückgesetzt")
+
+        except Exception as e:
+            print(f"⚠️ Fehler beim Zurücksetzen auf Defaults: {e}")
+            self._update_status("⚠️ Fehler beim Zurücksetzen auf Defaults")
+
+
+    def _toggle_source_mode(self):
+        """Zwischen API-Mode und lokalem Config-Mode umschalten"""
+        self.use_local_configs = not self.use_local_configs
+
+        if self.use_local_configs:
+            self.mode_button.config(text="📂")
+            self._load_local_configs()
+            self._update_status("📂 Lokale Configs geladen")
+        else:
+            self.mode_button.config(text="🌐")
+            self._load_coins()
+            self._update_status("🌐 API-Modus aktiviert")
+
+
+    def _load_local_configs(self):
+        """Lädt YAML-Dateien aus dem Config-Ordner"""
+        try:
+            yaml_files = sorted([f.name for f in self.config_dir.glob("*.yaml")])
+            self.coin_dropdown["values"] = yaml_files
+            if yaml_files:
+                self.coin_dropdown.set(yaml_files[0])
+                self._on_coin_select(None)
+            else:
+                self._update_status("❌ Keine YAML-Dateien gefunden")
+        except Exception as e:
+            self._update_status(f"❌ Fehler beim Laden: {e}")
+            print(f"Fehler beim Laden lokaler Configs: {e}")
 
 
 if __name__ == "__main__":
