@@ -8,6 +8,7 @@ import tkinter as tk
 from tkinter import ttk
 import sys
 import threading
+import yaml
 from pathlib import Path
 import pandas as pd
 import mplfinance as mpf
@@ -143,7 +144,7 @@ class GridConfigGUI:
 
         self.mode_button = tk.Button(
             coin_row,
-            text="🗂",
+            text="🌐",
             font=("Arial", 12),
             bg="#4a4a4a",
             fg="#ffffff",
@@ -256,12 +257,13 @@ class GridConfigGUI:
         self.use_local_configs = not self.use_local_configs
 
         if self.use_local_configs:
-            self._update_status("📂 Lokale Configs geladen")
-            self.mode_button.config(text="🌐")
+            #self._update_status("📂 Lokale Configs geladen")
+            self.mode_button.config(text="📂")
             self._load_local_configs()
         else:
-            self._update_status("🌐 Lade Coins von Bitunix API...")
-            self.mode_button.config(text="🗂")
+            #self._update_status("🌐 Lade Coins von Bitunix API...")
+            self.mode_button.config(text="🌐")
+            #self.mode_button.config(text="🗂")
             self._load_coins()
 
 
@@ -288,12 +290,20 @@ class GridConfigGUI:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     cfg = yaml.safe_load(f)
+
                 coin = cfg.get("symbol", "").strip('"')
                 if not coin:
                     self._update_status("⚠️ Kein Symbol in YAML gefunden")
                     return
+
+                # Setze Coin im Dropdown, damit Chart den richtigen Wert nutzt
+                self.selected_coin.set(coin)
+
                 self._update_status(f"📂 {name} geladen ({coin})")
+
+                # Chart für Symbol aus YAML laden
                 self._load_chart()
+
             except Exception as e:
                 self._update_status(f"❌ YAML-Fehler: {e}")
         else:
