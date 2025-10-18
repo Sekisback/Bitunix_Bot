@@ -257,13 +257,10 @@ class GridConfigGUI:
         self.use_local_configs = not self.use_local_configs
 
         if self.use_local_configs:
-            #self._update_status("📂 Lokale Configs geladen")
             self.mode_button.config(text="📂")
             self._load_local_configs()
         else:
-            #self._update_status("🌐 Lade Coins von Bitunix API...")
             self.mode_button.config(text="🌐")
-            #self.mode_button.config(text="🗂")
             self._load_coins()
 
 
@@ -322,9 +319,11 @@ class GridConfigGUI:
         # Chart aktualisieren
         self._load_chart()    
 
+
     def _load_chart(self):
         """Startet Thread für API-Call"""
         threading.Thread(target=self._load_chart_thread, daemon=True).start()
+
 
     def _load_chart_thread(self):
         """Lädt Daten im Hintergrund, aktualisiert Chart im Main-Thread"""
@@ -376,8 +375,8 @@ class GridConfigGUI:
 
         # === Kerzenfarben definieren ===
         mc = mpf.make_marketcolors(
-            up='#3172e5',       # ⬆️ steigende Candle -> rot
-            down='#b8b8b8',   # ⬇️ fallende Candle -> grün
+            up='#3172e5',     # ⬆️ steigende Candle
+            down='#b8b8b8',   # ⬇️ fallende Candle
             wick={'up':'#3172e5','down':'#b8b8b8'},
             edge='inherit',
             volume='inherit'
@@ -428,7 +427,7 @@ class GridConfigGUI:
         self.chart_canvas.draw()
 
         # Status + Auto-Refresh
-        self._update_status(f"✅ {coin} | {tf} | {len(df)} Bars")
+        self._update_status(f"✅ {coin}  | {tf}  |")
         if self._running:
             self._after_id = self.root.after(30000, self._load_chart)
 
