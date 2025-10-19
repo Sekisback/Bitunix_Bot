@@ -184,12 +184,19 @@ class GridBot:
         channels = [{"symbol": self.symbol, "ch": "ticker"}]
 
         try:
-            ws_public_task = asyncio.create_task(self.ws_public.start())
-            await asyncio.sleep(WS_STARTUP_DELAY)
-            await self.ws_public.subscribe(channels)
-
             ws_private_task = asyncio.create_task(self.ws_private.start())
-            await asyncio.sleep(WS_STARTUP_DELAY)
+
+            # Warte bis Verbindung WIRKLICH steht
+            max_wait = 10
+            waited = 0
+            while not self.ws_private.is_connected and waited < max_wait:
+                await asyncio.sleep(0.5)
+                waited += 0.5
+
+            if not self.ws_private.is_connected:
+                raise WebSocketConnectionError("Private WS timeout nach 10s")
+
+            # Jetzt erst subscriben
             await self.ws_private.subscribe([
                 {"ch": "order"},
                 {"ch": "position"},
