@@ -16,8 +16,8 @@ from typing import List
 
 # === Enums für typsichere Auswahl ===
 class GridMode(str, Enum):
-    linear = "linear"
-    logarithmisch = "logarithmisch"
+    LINEAR = "linear"
+    LOGARITHMISCH = "logarithmisch"
 
 
 class GridDirection(str, Enum):

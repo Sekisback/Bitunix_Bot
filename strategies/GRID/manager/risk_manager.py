@@ -94,13 +94,7 @@ class RiskManager:
     # Take-Profit Berechnung
     # =========================================================================
 
-    def calculate_take_profit(
-        self,
-        entry_price: float,
-        level_index: int,
-        side: str,
-        price_list: Optional[List[float]] = None
-    ) -> Optional[float]:
+    def calculate_take_profit(self, entry_price: float, level_index: int, side: str, price_list: Optional[List[float]] = None) -> Optional[float]:
         """
         Berechnet Take-Profit-Preis abhängig von Richtung und Modus
         
@@ -144,13 +138,7 @@ class RiskManager:
         
         return rounded
 
-    def _tp_next_grid(
-        self,
-        entry_price: float,
-        level_index: int,
-        side: str,
-        price_list: List[float]
-    ) -> Optional[float]:
+    def _tp_next_grid(self, entry_price: float, level_index: int, side: str, price_list: List[float]) -> Optional[float]:
         """
         TP = Nächstes Grid-Level
         
@@ -182,7 +170,7 @@ class RiskManager:
         BUY  → TP = entry × (1 + pct)
         SELL → TP = entry × (1 - pct)
         """
-        pct = float(self.grid_conf.take_profit_pct)
+        pct = float(self.grid_conf.take_profit_pct) / 100.0
         
         if side.upper() == "BUY":
             return entry_price * (1.0 + pct)
@@ -250,7 +238,7 @@ class RiskManager:
         BUY  → SL unterhalb = entry × (1 - pct)
         SELL → SL oberhalb  = entry × (1 + pct)
         """
-        pct = float(self.grid_conf.stop_loss_pct)
+        pct = float(self.grid_conf.stop_loss_pct) / 100
         
         if side.upper() == "BUY":
             return entry_price * (1.0 - pct)

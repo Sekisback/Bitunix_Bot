@@ -54,9 +54,9 @@ class GridCalculator:
         n = int(self.config.grid_levels)
         mode = self.config.grid_mode
         
-        if mode == GridMode.linear:
+        if mode == GridMode.LINEAR:
             prices = self._linear_grid(lower, upper, n)
-        elif mode == GridMode.logarithmisch:
+        elif mode == GridMode.LOGARITHMISCH:
             prices = self._logarithmisch_grid(lower, upper, n)
         else:
             raise ValueError(f"Unbekannter grid_mode: {mode}")

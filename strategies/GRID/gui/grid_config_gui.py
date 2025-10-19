@@ -488,11 +488,15 @@ class GridConfigGUI:
         form_frame_trading = tk.Frame(trading_section, bg="#1f1f1f")
         form_frame_trading.pack(fill=tk.X, pady=(0, 0), padx=(0, 2))
 
-        # === MARGIN MODE (aus YAML: margin.mode) ===
+        # === MARGIN MODE (aus YAML: margin.margin_mode) ===
         margin_data = schema_data.get("margin", {}).get("mode", {})
         margin_label = margin_data.get("label", "Margin Mode")
         margin_options = margin_data.get("options", [])
         margin_default = margin_data.get("default", margin_options[0] if margin_options else "")
+
+        # Übersetzungstabelle GUI <-> Config
+        margin_display_map = {opt: opt.upper() for opt in margin_options}
+        margin_display_values = [margin_display_map.get(opt, opt.upper()) for opt in margin_options]
 
         row = tk.Frame(form_frame_trading, bg="#1f1f1f")
         row.pack(fill=tk.X, pady=4)
@@ -507,13 +511,17 @@ class GridConfigGUI:
             width=18
         ).pack(side=tk.LEFT, fill=tk.X)
 
-        self.margin_mode_var = tk.StringVar(value=margin_default)
-        self.margin_mode_map = {opt: opt for opt in margin_options}
+        # Mapping GUI → Config
+        self.margin_mode_map = {margin_display_map.get(opt, opt.upper()): opt for opt in margin_options}
+
+        # Defaultanzeige (in Großbuchstaben)
+        default_display = margin_display_map.get(margin_default, margin_default.upper())
+        self.margin_mode_var = tk.StringVar(value=default_display)
 
         ttk.Combobox(
             row,
             textvariable=self.margin_mode_var,
-            values=margin_options,
+            values=margin_display_values,
             state="readonly",
             width=18,
             style="Grid.TCombobox"
@@ -560,21 +568,52 @@ class GridConfigGUI:
             validatecommand=validate_int
         ).pack(side=tk.RIGHT)
 
+        
+        # === BASE ORDER SIZE (aus YAML: grid.base_order_size) ===
+        base_field = grid_schema.get("base_order_size", {})
+        base_label = base_field.get("label", "Base Order Size")
+        base_default = base_field.get("default", 0.0)  # wird im API-Modus überschrieben
+
+        row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=base_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.base_order_size_var = tk.DoubleVar(value=float(base_default))
+        validate_float = (self.root.register(lambda v: v.replace(".", "", 1).isdigit() or v == ""), "%P")
+
+        ttk.Entry(
+            row,
+            textvariable=self.base_order_size_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
+
+
+        # === TP SECTION ===
+        tp_section_frame = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        tp_section_frame.pack(fill=tk.X)
+
         # === TP MODE (aus YAML: grid.tp_mode) ===
         tp_mode_field = grid_schema.get("tp_mode", {})
         tp_mode_label = tp_mode_field.get("label", "TP Mode")
         tp_mode_options = tp_mode_field.get("options", [])
         tp_mode_default = tp_mode_field.get("default", tp_mode_options[0] if tp_mode_options else "")
 
-        # Übersetzungstabelle GUI <-> Config
-        display_map = {
-            "percent": "PROZENT",
-            "next_grid": "NÄCHSTES GRID"
-        }
-
+        display_map = {"percent": "PROZENT", "next_grid": "NÄCHSTES GRID"}
         tp_mode_display = [display_map.get(opt, opt.upper()) for opt in tp_mode_options]
 
-        row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        row = tk.Frame(tp_section_frame, bg="#1f1f1f")
         row.pack(fill=tk.X, pady=4)
 
         tk.Label(
@@ -587,10 +626,7 @@ class GridConfigGUI:
             width=18
         ).pack(side=tk.LEFT, fill=tk.X)
 
-        # Mapping GUI → Config
         self.tp_mode_map = {display_map.get(opt, opt.upper()): opt for opt in tp_mode_options}
-
-        # Defaultanzeige deutsch
         default_display = display_map.get(tp_mode_default, tp_mode_default.upper())
         self.tp_mode_var = tk.StringVar(value=default_display)
 
@@ -604,14 +640,13 @@ class GridConfigGUI:
         )
         cb.pack(side=tk.RIGHT)
 
-        # === TAKE PROFIT PCT (aus YAML: grid.take_profit_pct) ===
+        # === TAKE PROFIT PCT ===
         take_profit_field = grid_schema.get("take_profit_pct", {})
         take_profit_label = take_profit_field.get("label", "Take Profit (%)")
         take_profit_default = take_profit_field.get("default", 0.003)
         visible_if = take_profit_field.get("visible_if", {})  # {"tp_mode": "percent"}
 
-        # Frame erstellen, aber NICHT sofort packen!
-        self.take_profit_row = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        self.take_profit_row = tk.Frame(tp_section_frame, bg="#1f1f1f")
 
         tk.Label(
             self.take_profit_row,
@@ -635,33 +670,133 @@ class GridConfigGUI:
             validatecommand=validate_float
         ).pack(side=tk.RIGHT)
 
-
-        # =========================================================================
-        # Sichtbarkeits
-        # =========================================================================
-        # === Sichtbarkeits-Logik basierend auf visible_if ===
+        # --- Sichtbarkeits-Logik TP ---
         def update_take_profit_visibility(*_):
-            """Zeigt oder versteckt das Feld 'take_profit_pct' dynamisch"""
             if not visible_if:
-                return  # kein Sichtbarkeitskriterium -> immer sichtbar
-
-            target_key, required_value = next(iter(visible_if.items()))  # tp_mode, percent
-            current_display_value = self.tp_mode_var.get()  # z. B. "PROZENT" oder "NÄCHSTES GRID"
-            current_config_value = self.tp_mode_map.get(current_display_value)  # → percent / next_grid
-
+                return
+            target_key, required_value = next(iter(visible_if.items()))
+            current_display_value = self.tp_mode_var.get()
+            current_config_value = self.tp_mode_map.get(current_display_value)
             if target_key == "tp_mode" and current_config_value == required_value:
-                # Feld sichtbar machen (falls noch nicht)
                 if not self.take_profit_row.winfo_ismapped():
                     self.take_profit_row.pack(fill=tk.X, pady=4)
             else:
-                # Feld ausblenden (falls sichtbar)
                 if self.take_profit_row.winfo_ismapped():
                     self.take_profit_row.pack_forget()
 
-        # --- Initialzustand + Binding aktivieren ---
         self.tp_mode_var.trace_add("write", update_take_profit_visibility)
-        # Initial einmal ausführen, um Zustand direkt zu setzen
         update_take_profit_visibility()
+
+        # === SL SECTION ===
+        sl_section_frame = tk.Frame(form_frame_trading, bg="#1f1f1f")
+        sl_section_frame.pack(fill=tk.X)
+
+        # === SL MODE ===
+        sl_mode_field = grid_schema.get("sl_mode", {})
+        sl_mode_label = sl_mode_field.get("label", "SL Mode")
+        sl_mode_options = sl_mode_field.get("options", [])
+        sl_mode_default = sl_mode_field.get("default", sl_mode_options[0] if sl_mode_options else "")
+
+        sl_display_map = {"percent": "PROZENT", "fixed": "FEST", "none": "KEINER"}
+        sl_mode_display = [sl_display_map.get(opt, opt.upper()) for opt in sl_mode_options]
+
+        row = tk.Frame(sl_section_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text=sl_mode_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.sl_mode_map = {sl_display_map.get(opt, opt.upper()): opt for opt in sl_mode_options}
+        sl_default_display = sl_display_map.get(sl_mode_default, sl_mode_default.upper())
+        self.sl_mode_var = tk.StringVar(value=sl_default_display)
+
+        cb_sl = ttk.Combobox(
+            row,
+            textvariable=self.sl_mode_var,
+            values=sl_mode_display,
+            state="readonly",
+            width=18,
+            style="Grid.TCombobox"
+        )
+        cb_sl.pack(side=tk.RIGHT)
+
+        # === STOP LOSS PCT ===
+        stop_loss_pct_field = grid_schema.get("stop_loss_pct", {})
+        stop_loss_pct_label = stop_loss_pct_field.get("label", "Stop-Loss (%)")
+        stop_loss_pct_default = stop_loss_pct_field.get("default", 1)
+
+        self.stop_loss_pct_row = tk.Frame(sl_section_frame, bg="#1f1f1f")
+
+        tk.Label(
+            self.stop_loss_pct_row,
+            text=stop_loss_pct_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.stop_loss_pct_var = tk.DoubleVar(value=float(stop_loss_pct_default))
+        ttk.Entry(
+            self.stop_loss_pct_row,
+            textvariable=self.stop_loss_pct_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
+
+        # === STOP LOSS PRICE ===
+        stop_loss_price_field = grid_schema.get("stop_loss_price", {})
+        stop_loss_price_label = stop_loss_price_field.get("label", "Stop-Loss Preis")
+        stop_loss_price_default = stop_loss_price_field.get("default", 0.8)
+
+        self.stop_loss_price_row = tk.Frame(sl_section_frame, bg="#1f1f1f")
+
+        tk.Label(
+            self.stop_loss_price_row,
+            text=stop_loss_price_label,
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.stop_loss_price_var = tk.DoubleVar(value=float(stop_loss_price_default))
+        ttk.Entry(
+            self.stop_loss_price_row,
+            textvariable=self.stop_loss_price_var,
+            width=18,
+            style="Grid.TEntry",
+            validate="key",
+            validatecommand=validate_float
+        ).pack(side=tk.RIGHT)
+
+        # --- Sichtbarkeitslogik SL ---
+        def update_sl_visibility(*args):
+            mode = self.sl_mode_var.get()
+            if mode == "PROZENT":
+                self.stop_loss_pct_row.pack(fill=tk.X, pady=4)
+                self.stop_loss_price_row.pack_forget()
+            elif mode == "FEST":
+                self.stop_loss_price_row.pack(fill=tk.X, pady=4)
+                self.stop_loss_pct_row.pack_forget()
+            else:
+                self.stop_loss_pct_row.pack_forget()
+                self.stop_loss_price_row.pack_forget()
+
+        update_sl_visibility()
+        self.sl_mode_var.trace_add("write", update_sl_visibility)
+
 
 
         # =========================================================================
@@ -714,10 +849,10 @@ class GridConfigGUI:
         self._update_status("⏳ Lade Coins...")
         
         try:
-            # API Call
+            # === API Call ===
             response = self.client_pub.get_trading_pairs()
             
-            # Response parsen
+            # === Response parsen ===
             if isinstance(response, dict):
                 data = response.get("data", [])
             elif isinstance(response, list):
@@ -725,28 +860,49 @@ class GridConfigGUI:
             else:
                 data = []
             
-            # Symbole extrahieren
-            self.coins = [pair.get("symbol", "") for pair in data if "symbol" in pair]
+            # === Symbole & minTradeVolume extrahieren ===
+            self.coins = []
+            self.coin_min_volume = {}  # 🔹 Dictionary für minTradeVolume
+
+            for pair in data:
+                symbol = pair.get("symbol", "")
+                if symbol:
+                    self.coins.append(symbol)
+                    try:
+                        self.coin_min_volume[symbol] = float(pair.get("minTradeVolume", 0.0))
+                    except Exception:
+                        self.coin_min_volume[symbol] = 0.0
+
             self.coins.sort()
-            
-            # Dropdown füllen
-            self.coin_dropdown['values'] = self.coins
-            
-            # Default: BTCUSDT wenn vorhanden
+
+            # === Dropdown füllen ===
+            self.coin_dropdown["values"] = self.coins
+
+            # === Default: BTCUSDT, falls vorhanden ===
             if "BTCUSDT" in self.coins:
                 self.coin_dropdown.set("BTCUSDT")
             elif self.coins:
                 self.coin_dropdown.set(self.coins[0])
-            
+
             self._update_status(f"✅ {len(self.coins)} Coins geladen")
-            
-            # Initial Chart laden
+
+            # === Initial Chart laden ===
             if self.coins:
                 self._load_chart()
-            
+
+            # === Initiale Coin-Selektion triggern, damit Base Order Size gesetzt wird ===
+            if self.coins:
+                try:
+                    # Event simulieren → ruft automatisch API-Mode-Logik aus _on_coin_select() auf
+                    self._on_coin_select(None)
+                except Exception as e:
+                    print(f"⚠️ Konnte initiale Coin-Selektion nicht triggern: {e}")
+
+
         except Exception as e:
             self._update_status(f"❌ Fehler: {e}")
             print(f"Error loading coins: {e}")
+
     
 
     def _load_local_configs(self):
@@ -768,6 +924,7 @@ class GridConfigGUI:
         name = self.selected_coin.get()
 
         if self.use_local_configs and name.endswith(".yaml"):
+            # === CONFIG-MODUS (📂) ===
             file_path = self.config_dir / name
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
@@ -778,9 +935,8 @@ class GridConfigGUI:
                     self._update_status("⚠️ Kein Symbol in YAML gefunden")
                     return
 
-                # Setze Coin im Dropdown, damit Chart den richtigen Wert nutzt
+                # Coin im Dropdown setzen, damit Chart den richtigen Wert nutzt
                 self.selected_coin.set(coin)
-
                 self._update_status(f"📂 {name} geladen ({coin})")
 
                 # Config-Werte aus YAML auf GUI anwenden
@@ -791,11 +947,25 @@ class GridConfigGUI:
 
             except Exception as e:
                 self._update_status(f"❌ YAML-Fehler: {e}")
+
         else:
-            # Normaler Coin von API
+            # === API-MODUS (🌐) ===
             coin = name
             self._update_status(f"📊 {coin} | {self.selected_timeframe.get()}")
+
+            # Chart neu laden
             self._load_chart()
+
+            # --- Base Order Size automatisch mit minTradeVolume belegen ---
+            try:
+                if hasattr(self, "coin_min_volume") and coin in self.coin_min_volume:
+                    min_vol = float(self.coin_min_volume[coin])
+                    if hasattr(self, "base_order_size_var"):
+                        self.base_order_size_var.set(min_vol)
+                        print(f"🔹 Base Order Size für {coin} auf {min_vol} gesetzt")
+            except Exception as e:
+                print(f"⚠️ Konnte Base Order Size nicht setzen: {e}")
+
 
     
     def _on_timeframe_select(self, timeframe):
@@ -962,73 +1132,186 @@ class GridConfigGUI:
         """Überträgt Werte aus geladener Coin-Config in die GUI-Variablen"""
         try:
             trading = cfg.get("trading", {})
+            margin = cfg.get("margin", {})
             grid = cfg.get("grid", {})
 
-            # === Grid Direction ===
+            # === TRADING SEKTION ===
             if "grid_direction" in trading and hasattr(self, "grid_dir_var"):
-                val = trading["grid_direction"]
+                val = trading["grid_direction"].strip('"')
                 if hasattr(self, "grid_dir_map"):
                     for display, real in self.grid_dir_map.items():
                         if real == val:
                             self.grid_dir_var.set(display)
                             break
 
-            # === Grid Mode ===
+            # === MARGIN SEKTION ===
+            if "margin_mode" in margin and hasattr(self, "margin_mode_var"):
+                val = margin["margin_mode"].strip('"')
+                display_val = next((k for k, v in self.margin_mode_map.items() if v == val), val.upper())
+                self.margin_mode_var.set(display_val)
+
+
+            if "leverage" in margin and hasattr(self, "leverage_var"):
+                try:
+                    self.leverage_var.set(int(margin["leverage"]))
+                except Exception:
+                    pass
+
+            # === GRID SEKTION ===
             if "grid_mode" in grid and hasattr(self, "grid_mode_var"):
-                val = grid["grid_mode"]
+                val = grid["grid_mode"].strip('"')
                 if hasattr(self, "grid_mode_map"):
                     for display, real in self.grid_mode_map.items():
                         if real == val:
                             self.grid_mode_var.set(display)
                             break
 
+            if "upper_price" in grid and hasattr(self, "upper_price_var"):
+                self.upper_price_var.set(float(grid["upper_price"]))
+
+            if "lower_price" in grid and hasattr(self, "lower_price_var"):
+                self.lower_price_var.set(float(grid["lower_price"]))
+
+            if "grid_levels" in grid and hasattr(self, "grid_levels_var"):
+                self.grid_levels_var.set(int(grid["grid_levels"]))
+
+            if "base_order_size" in grid and hasattr(self, "base_order_size_var"):
+                self.base_order_size_var.set(float(grid["base_order_size"]))
+
+
+            # === TP-Parameter ===
+            if "tp_mode" in grid and hasattr(self, "tp_mode_var"):
+                val = grid["tp_mode"].strip('"')
+                display = next((k for k, v in self.tp_mode_map.items() if v == val), None)
+                if display:
+                    self.tp_mode_var.set(display)
+
+            if "take_profit_pct" in grid and hasattr(self, "take_profit_var"):
+                self.take_profit_var.set(float(grid["take_profit_pct"]))
+
+            # === SL-Parameter ===
+            if "sl_mode" in grid and hasattr(self, "sl_mode_var"):
+                val = grid["sl_mode"].strip('"')
+                display = next((k for k, v in self.sl_mode_map.items() if v == val), None)
+                if display:
+                    self.sl_mode_var.set(display)
+
+            if "stop_loss_pct" in grid and hasattr(self, "stop_loss_pct_var"):
+                self.stop_loss_pct_var.set(float(grid["stop_loss_pct"]))
+
+            if "stop_loss_price" in grid and hasattr(self, "stop_loss_price_var"):
+                self.stop_loss_price_var.set(float(grid["stop_loss_price"]))
+
+            # === Sichtbarkeit aktualisieren ===
+            try:
+                self.root.after(50, lambda: [
+                    self.tp_mode_var.set(self.tp_mode_var.get()),
+                    self.sl_mode_var.set(self.sl_mode_var.get())
+                ])
+            except Exception:
+                pass
+
             self._update_status("✅ Config-Werte übernommen")
 
         except Exception as e:
             print(f"⚠️ Fehler beim Anwenden der Config-Werte: {e}")
+            import traceback; traceback.print_exc()
             self._update_status("⚠️ Fehler beim Anwenden der Config-Werte")
 
 
     def _save_current_config(self):
-            """Speichert aktuelle GUI-Werte in die aktive oder neue YAML-Datei"""
-            try:
-                symbol = self.selected_coin.get()
-                if not symbol:
-                    self._update_status("⚠️ Kein Symbol ausgewählt")
-                    return
+        """Speichert aktuelle GUI-Werte in die aktive oder neue YAML-Datei"""
+        try:
+            symbol = self.selected_coin.get()
+            if not symbol:
+                self._update_status("⚠️ Kein Symbol ausgewählt")
+                return
 
-                # === GUI-Werte holen ===
-                trading = {
-                    "grid_direction": self.grid_dir_map.get(self.grid_dir_var.get(), "").lower()
-                }
-                grid = {
-                    "grid_mode": self.grid_mode_map.get(self.grid_mode_var.get(), "").lower(),
-                    "upper_price": float(self.upper_price_var.get()),
-                    "lower_price": float(self.lower_price_var.get()),
-                    "grid_levels": int(self.grid_levels_var.get())
-                }
+            # === TRADING SEKTION ===
+            trading = {
+                "grid_direction": self.grid_dir_map.get(self.grid_dir_var.get(), "").lower()
+            }
 
-                config_data = {
-                    "symbol": symbol,
-                    "trading": trading,
-                    "grid": grid
-                }
+            # === MARGIN SEKTION ===
+            margin = {}
+            if hasattr(self, "margin_mode_var"):
+                margin["margin_mode"] = self.margin_mode_var.get().lower()
+            if hasattr(self, "leverage_var"):
+                try:
+                    margin["leverage"] = int(self.leverage_var.get())
+                except ValueError:
+                    margin["leverage"] = 1
 
-                # === Zielpfad bestimmen ===
-                if self.use_local_configs and hasattr(self, "current_config_path") and self.current_config_path:
-                    save_path = self.current_config_path
+            # === GRID SEKTION ===
+            grid = {
+                "grid_mode": self.grid_mode_map.get(self.grid_mode_var.get(), "").lower(),
+                "upper_price": float(self.upper_price_var.get()),
+                "lower_price": float(self.lower_price_var.get()),
+                "grid_levels": int(self.grid_levels_var.get())
+            }
+
+            # === TRADING PARAMETER (innerhalb GRID) ===
+            if hasattr(self, "tp_mode_var"):
+                grid["tp_mode"] = self.tp_mode_map.get(self.tp_mode_var.get(), "percent")
+            if hasattr(self, "take_profit_var"):
+                grid["take_profit_pct"] = float(self.take_profit_var.get())
+
+            if hasattr(self, "sl_mode_var"):
+                grid["sl_mode"] = self.sl_mode_map.get(self.sl_mode_var.get(), "none")
+
+            if hasattr(self, "stop_loss_pct_var") and self.stop_loss_pct_row.winfo_ismapped():
+                grid["stop_loss_pct"] = float(self.stop_loss_pct_var.get())
+            if hasattr(self, "stop_loss_price_var") and self.stop_loss_price_row.winfo_ismapped():
+                grid["stop_loss_price"] = float(self.stop_loss_price_var.get())
+            
+            if hasattr(self, "base_order_size_var"):
+                grid["base_order_size"] = float(self.base_order_size_var.get())
+
+
+            # === GESAMTE CONFIG ===
+            config_data = {
+                "symbol": symbol,
+                "trading": trading,
+                "margin": margin,
+                "grid": grid
+            }
+
+            # === ZIELPFAD BESTIMMEN ===
+            if self.use_local_configs and hasattr(self, "current_config_path") and self.current_config_path:
+                save_path = self.current_config_path
+            else:
+                save_path = self.config_dir / f"{symbol}.yaml"
+
+            # === YAML SCHREIBEN mit Anführungszeichen für Strings ===
+            class QuotedString(str): pass
+
+            def quoted_presenter(dumper, data):
+                return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"')
+
+            yaml.add_representer(QuotedString, quoted_presenter)
+
+            # Strings konvertieren
+            def quote_strings(obj):
+                if isinstance(obj, dict):
+                    return {k: quote_strings(v) for k, v in obj.items()}
+                elif isinstance(obj, list):
+                    return [quote_strings(i) for i in obj]
+                elif isinstance(obj, str):
+                    return QuotedString(obj)
                 else:
-                    save_path = self.config_dir / f"{symbol}.yaml"
+                    return obj
 
-                # === YAML schreiben ===
-                with open(save_path, "w", encoding="utf-8") as f:
-                    yaml.dump(config_data, f, sort_keys=False, allow_unicode=True)
+            quoted_data = quote_strings(config_data)
 
-                self._update_status(f"💾 Gespeichert: {save_path.name}")
+            with open(save_path, "w", encoding="utf-8") as f:
+                yaml.dump(quoted_data, f, sort_keys=False, allow_unicode=True)
 
-            except Exception as e:
-                print(f"❌ Fehler beim Speichern: {e}")
-                self._update_status("❌ Fehler beim Speichern der Config")
+            self._update_status(f"💾 Gespeichert: {save_path.name}")
+
+        except Exception as e:
+            print(f"❌ Fehler beim Speichern: {e}")
+            self._update_status("❌ Fehler beim Speichern der Config")
+
 
 
     def _reset_to_defaults(self):

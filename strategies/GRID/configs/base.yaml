@@ -52,10 +52,10 @@ grid:
   reorder_distance_steps: 2         # Mindestabstand in Grid-Steps für ReOrder (1 = nächstes Level, 2 = übernächstes)
 
   tp_mode: "percent"                # "percent" oder "next_grid"
-  take_profit_pct: 0.003            # Nur aktiv, wenn tp_mode = "percent"
+  take_profit_pct: 3.0              # Nur aktiv, wenn tp_mode = "percent"
 
   sl_mode: "percent"                # "percent", "fixed" oder "none"
-  stop_loss_pct: 0.01               # Nur aktiv, wenn sl_mode = "percent"
+  stop_loss_pct: 1.0                # Nur aktiv, wenn sl_mode = "percent"
   stop_loss_price: 0.1              # Nur bei sl_mode = "fixed" aktiv
 
   rebalance_interval: 300           # Sekunden zwischen automatischem Rebalancing

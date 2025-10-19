@@ -147,13 +147,13 @@ grid:
 
   tp_mode:
     type: select
-    options: ["percent", "next_grid"]
+    options: ["next_grid", "percent"]
     default: "next_grid"
     description: "Art der Gewinnmitnahme"
 
   take_profit_pct:
     type: float
-    default: 0.003
+    default: 3
     visible_if:
       tp_mode: "percent"     # nur anzeigen, wenn tp_mode = percent
     description: "Nur aktiv, wenn tp_mode = percent"
@@ -161,12 +161,12 @@ grid:
   sl_mode:
     type: select
     options: ["percent", "fixed", "none"]
-    default: "percent"
+    default: "none"
     description: "Stop-Loss-Modus"
 
   stop_loss_pct:
     type: float
-    default: 0.01
+    default: 1
     visible_if:
       sl_mode: "percent"
     description: "Nur aktiv, wenn sl_mode = percent"
@@ -278,7 +278,7 @@ margin:
 
   leverage:
     type: int
-    default: 3
+    default: 1
     min: 1
     max: 125
     label: "Leverage"
