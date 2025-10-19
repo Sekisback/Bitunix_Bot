@@ -66,7 +66,7 @@ class GridConfig(BaseModel):
     lower_price: float = Field(gt=0, description="Untere Preisgrenze")
 
     grid_levels: int = Field(ge=2, le=100)
-    grid_mode: GridMode = GridMode.linear
+    grid_mode: GridMode = GridMode.LINEAR
     min_price_step: float = Field(default=0.0000001, gt=0)
 
     base_order_size: float = Field(gt=0)

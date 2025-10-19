@@ -229,6 +229,9 @@ class GridConfigGUI:
         for col in range(6):
             tf_row.grid_columnconfigure(col, weight=1, uniform="tf")
 
+        # Speichere Buttons für späteren Zugriff
+        self.timeframe_buttons = {}
+
         for i, tf in enumerate(["1M", "5M", "15M", "1H", "4H", "1D"]):
             btn = tk.Button(
                 tf_row,
@@ -243,6 +246,12 @@ class GridConfigGUI:
             )
             padx = (0, 2) if i < 5 else (0, 0)
             btn.grid(row=0, column=i, sticky="ew", padx=padx)
+            
+            # Button speichern
+            self.timeframe_buttons[tf] = btn
+        
+        # Initial 15M markieren
+        self.timeframe_buttons["15M"].config(bg="#5c5c5c")  
 
         # === STATUS-LABEL (unten fixiert) ===
         self.status_label = tk.Label(
@@ -369,6 +378,7 @@ class GridConfigGUI:
         grid_schema = schema_data.get("grid", {})
         create_dropdown_row(form_frame, grid_schema, "grid_mode",
                             "grid_mode_var", "grid_mode_map")
+        
 
         # === UPPER PRICE (aus YAML: grid.upper_price) ===
         upper_field = grid_schema.get("upper_price", {})
@@ -434,8 +444,6 @@ class GridConfigGUI:
         levels_field = grid_schema.get("grid_levels", {})
         levels_label = levels_field.get("label", "Grid Levels")
         levels_default = levels_field.get("default", 10)
-        levels_min = levels_field.get("min", 1)
-        levels_max = levels_field.get("max", 200)
 
         row = tk.Frame(form_frame, bg="#1f1f1f")
         row.pack(fill=tk.X, pady=4)
@@ -450,25 +458,42 @@ class GridConfigGUI:
             width=18
         ).pack(side=tk.LEFT, fill=tk.X)
 
-        def validate_int_in_range(v):
-            if v == "":
-                return True
-            if v.isdigit():
-                val = int(v)
-                return levels_min <= val <= levels_max
-            return False
-
-        validate_int = (self.root.register(validate_int_in_range), "%P")
-
         self.grid_levels_var = tk.IntVar(value=int(levels_default))
         ttk.Entry(
             row,
             textvariable=self.grid_levels_var,
             width=18,
-            style="Grid.TEntry",
-            validate="key",
-            validatecommand=validate_int
+            style="Grid.TEntry"
         ).pack(side=tk.RIGHT)
+
+        # === GRID ANZEIGE TOGGLE ===
+        self.show_grid_lines = tk.BooleanVar(value=False)
+
+        row = tk.Frame(form_frame, bg="#1f1f1f")
+        row.pack(fill=tk.X, pady=4)
+
+        tk.Label(
+            row,
+            text="Grid Visualisierung",
+            font=("Arial", 10),
+            bg="#1f1f1f",
+            fg="#888888",
+            anchor="w",
+            width=18
+        ).pack(side=tk.LEFT, fill=tk.X)
+
+        self.grid_toggle_button = tk.Button(
+            row,
+            text="Anzeigen",
+            font=("Arial", 10),
+            bg="#3a3a3a",
+            fg="#ffffff",
+            activebackground="#5c5c5c",
+            relief="flat",
+            width=18,
+            command=self._toggle_grid_lines
+        )
+        self.grid_toggle_button.pack(side=tk.RIGHT)
 
         # ================================================================
         # TRADING PARAMETER (vollständig YAML-basiert)
@@ -962,20 +987,24 @@ class GridConfigGUI:
                     min_vol = float(self.coin_min_volume[coin])
                     if hasattr(self, "base_order_size_var"):
                         self.base_order_size_var.set(min_vol)
-                        print(f"🔹 Base Order Size für {coin} auf {min_vol} gesetzt")
             except Exception as e:
                 print(f"⚠️ Konnte Base Order Size nicht setzen: {e}")
 
 
     
     def _on_timeframe_select(self, timeframe):
-        """Callback wenn Timeframe ausgewählt wird"""
+        # Alle Buttons zurücksetzen
+        for tf, btn in self.timeframe_buttons.items():
+            btn.config(bg="#3a3a3a")
+        
+        # Aktiven Button highlighten
+        self.timeframe_buttons[timeframe].config(bg="#5c5c5c")
+        
+        # Rest wie gehabt
         self.selected_timeframe.set(timeframe)
         coin = self.selected_coin.get()
         self._update_status(f"📊 {coin} | {timeframe}")
-        
-        # Chart aktualisieren
-        self._load_chart()    
+        self._load_chart()
 
 
     def _load_chart(self):
@@ -1025,30 +1054,41 @@ class GridConfigGUI:
 
 
     def _update_chart(self, df, coin, tf):
-        """Aktualisiert bestehenden Chart im TradingView-Style ohne Flackern"""
+        """Aktualisiert Chart mit optionalen Grid-Linien"""
         import matplotlib.pyplot as plt
+        import numpy as np
 
-        # === Update ohne Neuzeichnen des Canvas ===
+        # Chart beim ersten Aufruf initialisieren
+        if not hasattr(self, "fig"):
+            self.fig, self.ax = plt.subplots(figsize=(13, 9), dpi=120, facecolor="#2e2e2e")
+            self.ax.set_facecolor("#2e2e2e")
+            
+            # Canvas einmalig erstellen
+            self.chart_canvas = FigureCanvasTkAgg(self.fig, master=self.chart_frame)
+            self.chart_canvas.get_tk_widget().configure(bg="#2e2e2e")
+            self.chart_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # === Chart leeren ===
         self.ax.clear()
 
-        # === Kerzenfarben definieren ===
+        # === Kerzenfarben ===
         mc = mpf.make_marketcolors(
-            up='#3172e5',     # ⬆️ steigende Candle
-            down='#b8b8b8',   # ⬇️ fallende Candle
+            up='#3172e5',
+            down='#b8b8b8',
             wick={'up':'#3172e5','down':'#b8b8b8'},
             edge='inherit',
             volume='inherit'
         )
 
-        # Stil mit diesen Farben kombinieren
         s = mpf.make_mpf_style(
             base_mpf_style='nightclouds',
             marketcolors=mc
         )
 
-        # Format: Uhrzeit für < 1 Tag, Datum für 1D
+        # === Zeitformat ===
         time_format = "%H:%M" if tf != "1D" else "%d.%b"
 
+        # === Candlestick-Chart zeichnen ===
         mpf.plot(
             df.sort_index(ascending=True),
             type="candle",
@@ -1060,31 +1100,93 @@ class GridConfigGUI:
         )
 
         # === TradingView-Look ===
-        # Kein Y-Label
         self.ax.set_ylabel("")
-
-        # Kein Rahmen
+        
         for spine in self.ax.spines.values():
             spine.set_visible(False)
-
-        # Horizontale Linien leicht gestrichelt
+        
         self.ax.grid(True, axis="y", color="#404040", linestyle="--", linewidth=0.6)
-        # Vertikale Linien aus
         self.ax.grid(False, axis="x")
-
-        # Achsen-Ticks
+        
         self.ax.tick_params(colors="#cccccc", labelsize=8, pad=1)
         self.ax.title.set_color("#ffffff")
-
-        # Weniger Rand unten
+        
         self.ax.margins(x=0.02, y=0.05)
         self.fig.subplots_adjust(left=0.05, right=0.985, top=0.99, bottom=0.04)
 
+        # =========================================================================
+        # GRID-LINIEN ZEICHNEN (wenn aktiviert)
+        # =========================================================================
+        if hasattr(self, 'show_grid_lines') and self.show_grid_lines.get():
+            try:
+                # Parameter aus GUI holen
+                upper = float(self.upper_price_var.get())
+                lower = float(self.lower_price_var.get())
+                levels = int(self.grid_levels_var.get())
+                
+                # Handelsrichtung
+                grid_dir_display = self.grid_dir_var.get()
+                grid_dir = self.grid_dir_map.get(grid_dir_display, "long").lower()
+                
+                # Grid-Modus
+                mode_display = self.grid_mode_var.get()
+                mode = self.grid_mode_map.get(mode_display, "linear").lower()
+                
+                # Aktueller Preis (letzter Close)
+                current_price = float(df['close'].iloc[0])
+                
+                # === Grid-Preise berechnen ===
+                if mode == "linear":
+                    # Gleiche Abstände
+                    price_list = np.linspace(lower, upper, levels + 1)
+                else:
+                    # Geometric (prozentuale Abstände)
+                    if lower <= 0 or upper <= 0:
+                        price_list = np.linspace(lower, upper, levels + 1)
+                    else:
+                        ratio = (upper / lower) ** (1 / levels)
+                        price_list = [lower * (ratio ** i) for i in range(levels + 1)]
+                
+                # === Linien zeichnen ===
+                for i, price in enumerate(price_list):
+                    # Bestimme Farbe abhängig von Richtung und Position
+                    if grid_dir == "long":
+                        # LONG: unter Preis grün, darüber rot
+                        if price <= current_price:  # ← hier <= statt 
+                            color = "#00ff00"  # grün
+                        else:
+                            color = "#ff0000"  # rot
+                    else:
+                        # SHORT: unter Preis rot, darüber grün
+                        if price <= current_price:  # ← hier <= statt 
+                            color = "#ff0000"  # rot
+                        else:
+                            color = "#00ff00"  # grün
+                                    
+                    # Dicke Linie für obere/untere Grenze
+                    if i == 0 or i == len(price_list) - 1:
+                        linewidth = 2.0
+                        alpha = 0.8
+                    else:
+                        linewidth = 0.8
+                        alpha = 0.5
+                    
+                    # Horizontale Linie zeichnen
+                    self.ax.axhline(
+                        y=price,
+                        color=color,
+                        linewidth=linewidth,
+                        linestyle='-',
+                        alpha=alpha
+                    )
+            
+            except Exception as e:
+                print(f"⚠️ Fehler beim Zeichnen der Grid-Linien: {e}")
 
-        # Flackerfreies Redraw
+        # === Chart neu zeichnen ===
         self.chart_canvas.draw()
 
-        # Status + Auto-Refresh
+        # === Status + Auto-Refresh ===
         self._update_status(f"✅ {coin}  | {tf}  |")
         if self._running:
             self._after_id = self.root.after(30000, self._load_chart)
@@ -1359,6 +1461,19 @@ class GridConfigGUI:
             self._load_coins()
             self._update_status("🌐 API-Modus aktiviert")
 
+    def _toggle_grid_lines(self):
+        """Schaltet Grid-Linien ein/aus und aktualisiert Chart"""
+        current = self.show_grid_lines.get()
+        self.show_grid_lines.set(not current)
+        
+        # Button-Text anpassen
+        if self.show_grid_lines.get():
+            self.grid_toggle_button.config(text="Ausblenden")
+        else:
+            self.grid_toggle_button.config(text="Anzeigen")
+        
+        # Chart neu zeichnen
+        self._load_chart()
 
 if __name__ == "__main__":
     app = GridConfigGUI()
